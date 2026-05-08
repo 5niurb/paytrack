@@ -35,6 +35,42 @@ Plaid sync flow (after fix):
 
 ---
 
+## Session — 2026-05-08 (Add Payment modal fix + comma formatting)
+
+**Focus:** Fix Add Payment button doing nothing on Payouts tab; comma-format all dollar amounts > $999.
+
+**Accomplished:**
+- Fixed `#payment-modal-overlay` hidden because it was nested inside `#admin-screen` (which uses `.screen { display: none }`). Moved modal to be a direct `<body>` sibling of other modals, outside `admin-screen`
+- Fixed duplicate `display:none` in modal inline style (two declarations, second wins in cascade)
+- Added `window.openPaymentModal = openPaymentModal` etc. to guarantee inline `onclick` access in `admin.js`
+- Added `fmtAmt()` helper to `index.js` → `toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})`
+- Replaced all dollar `toFixed(2)` display calls with `fmtAmt()`: Pay Review daily rows, Pay Review footer totals, invoice table rows/totals, period summary dashboard cards, daily entry list, commission calculator display
+- Deployed: commit `0a8674c` pushed + Render auto-deploy confirmed live
+
+**Diagram:**
+```
+Before:                          After:
+<body>                           <body>
+  <div id="admin-screen">          <div id="admin-screen">
+    .screen { display:none }         ...
+    <div id="payment-modal">       </div>
+      position:fixed               <div id="delete-modal">...</div>
+      HIDDEN (parent hides it)     <div id="payment-modal">
+    </div>                           position:fixed
+  </div>                             VISIBLE ✓
+</body>                           </body>
+```
+
+**Current State:** Add Payment modal opens correctly. Dollar amounts show commas ($1,234.56). Deployed live.
+
+**Issues:** None from this session. See prior sessions for RENDER_SERVICE_ID and lm-app security review items.
+
+**Next Steps:**
+- Add RENDER_SERVICE_ID back to Render env vars (from prior session)
+- lm-app security review: app_metadata.scope persistence, trust proxy/XFF, dev OTP bypass
+
+---
+
 ## Session — 2026-05-08 (Payouts hang fix + Render env-var wipe recovery)
 
 **Focus:** Fix Payouts tab hang on cold start; fix Render API 405 errors for Chase/Plaid; recover from accidental env var wipe.
