@@ -30,7 +30,7 @@ Spawn the `security-reviewer` agent automatically when touching:
 
 | Project | Env Vars |
 |---------|----------|
-| timetracker | SUPABASE_URL, SUPABASE_ANON_KEY, RESEND_API_KEY, ADMIN_PASSWORD, PORT |
+| paytrack | SUPABASE_URL, SUPABASE_ANON_KEY, PAYTRACK_ENCRYPTION_KEY, RESEND_API_KEY, ADMIN_PASSWORD, PORT |
 | lm-app | SUPABASE_URL, SUPABASE_ANON_KEY, TWILIO creds, STRIPE keys, RESEND_API_KEY |
 | lemedspa-website | CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID (deploy only) |
 

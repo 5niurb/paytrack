@@ -58,13 +58,17 @@ Requires `.env` file with:
 ## Database
 
 All data lives in Supabase PostgreSQL. Tables:
-- `employees` — name, PIN, email, hourly_wage, pay_type
+- `employees` — name, PIN, email, hourly_wage, pay_type (note: `006-flatten-employees.sql` flattened legacy structure)
 - `time_entries` — date, hours, start/end times, breaks
 - `client_entries` — patient services (linked to time_entry)
 - `product_sales` — product commissions (linked to time_entry)
 - `invoices` — submitted pay period invoices
+- `worker_onboarding` (002–004) — self-onboarding flow with AES-256-GCM encrypted TIN/banking
+- `tax_filings` (005) — 1099 prep + filing tracking
+- `compliance_*` (007) — compliance scanner output (background job nightly)
+- `plaid_*` (009/010) — bank-sync via Plaid (production, read-only against user accounts)
 
-Schema: `supabase-schema.sql` — run in Supabase SQL Editor to set up.
+Schema is layered: `supabase-schema.sql` is the base; subsequent changes live as numbered files in `migrations/` (currently `002-worker-onboarding.sql` through `010_plaid_fixes.sql`). Apply in numeric order via Supabase SQL Editor or the `/migrate` skill.
 
 ## Pay Periods
 
@@ -84,8 +88,17 @@ All dates use Los Angeles timezone (`America/Los_Angeles`).
 
 ### Admin Panel (`/admin`)
 - **Review Entries** — Pay period navigation with arrows, employee filter, daily breakdown table
-- **Employees** — Add/edit/delete employees, set pay type and hourly wage
-- **Reports** — Date range reports with earnings by employee
+- **Team Members** — Add/edit/delete team members, set pay type and hourly wage
+- **Reports** — Date range reports with earnings by team member
+
+### Onboarding (`/onboarding`)
+- Self-onboarding flow for new team members (SMS/email link from admin)
+- Encrypted fields (TIN, bank routing/account) via `PAYTRACK_ENCRYPTION_KEY`
+- Conditional license/insurance fields for clinical titles
+
+### Compliance (`/compliance`)
+- Compliance scanner dashboard (license expirations, insurance COI, tax docs)
+- Background job: `com.lemed.compliance-scanner` (daily 11pm — see workspace CLAUDE.md)
 
 ## Conventions
 

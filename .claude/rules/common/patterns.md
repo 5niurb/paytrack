@@ -21,7 +21,7 @@ Each skill/agent declares which tools it's allowed to use. The executor validate
 
 ## API Response Format
 
-For lm-app and timetracker APIs, use a consistent envelope:
+For lm-app and paytrack APIs, use a consistent envelope:
 - Include success/status indicator
 - Include data payload (nullable on error)
 - Include error message (nullable on success)

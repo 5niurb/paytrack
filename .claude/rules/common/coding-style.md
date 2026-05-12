@@ -4,7 +4,7 @@
 
 Each project has its own tech stack — respect it:
 - **lemedspa-website**: Vanilla HTML/CSS/JS. No frameworks, no build tools.
-- **timetracker**: Express + Supabase. No ORM, direct Supabase client calls.
+- **paytrack**: Express + Supabase. No ORM, direct Supabase client calls.
 - **lm-app**: SvelteKit + shadcn-svelte + Tailwind v4 (frontend), Express (API), Supabase (database).
 
 Prefer vanilla JS over adding dependencies. Keep things simple.

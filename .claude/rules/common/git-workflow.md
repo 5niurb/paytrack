@@ -14,7 +14,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 Examples:
 - `[website] Add NuEra Tight to medical services`
 - `[config] Update CLAUDE.md with git sync instructions`
-- `[timetracker] Fix pay period calculation for biweekly`
+- `[paytrack] Fix pay period calculation for biweekly`
 - `[lm-app] Scaffold call logging API routes`
 
 ## Auto-Sync Rules
