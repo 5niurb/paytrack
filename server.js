@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 
 const { getPayPeriod, formatDateForDB, getPayPeriodByOffset, getPayPeriodLabel } = require('./lib/pay-periods');
 const { validateOnboarding, extractLast4SSN, extractLast4Routing, extractLast4Account, CLINICAL_TITLES } = require('./lib/onboarding-validation');
@@ -535,8 +536,17 @@ async function sendInvoiceEmail(employee, periodStart, periodEnd, summary, entri
 
 // ============ API ROUTES ============
 
+// Rate limiter for PIN verification — 10 attempts per 15 minutes per IP
+const pinRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many attempts. Please try again later.' },
+});
+
 // Verify employee PIN
-app.post('/api/verify-pin', async (req, res) => {
+app.post('/api/verify-pin', pinRateLimit, async (req, res) => {
   const { pin } = req.body;
 
   const { data: employee, error } = await supabaseAdmin
@@ -1132,6 +1142,11 @@ app.post('/api/admin/verify', (req, res) => {
 
 // Get all employees (includes onboarding status)
 app.get('/api/admin/employees', async (req, res) => {
+  const password = req.headers['x-admin-password'] || req.query.password;
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
   const { data: employees, error } = await supabaseAdmin
     .from('employees')
     .select(
@@ -1143,6 +1158,11 @@ app.get('/api/admin/employees', async (req, res) => {
 
 // Add new employee — auto-generates review_token
 app.post('/api/admin/employees', async (req, res) => {
+  const password = req.headers['x-admin-password'] || req.body.password;
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
   const {
     name,
     pin,

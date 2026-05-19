@@ -174,7 +174,9 @@
 
     async function loadEmployeesForFilter() {
       try {
-        const response = await fetch('/api/admin/employees');
+        const response = await fetch('/api/admin/employees', {
+          headers: { 'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '' },
+        });
         allEmployees = await response.json();
 
         const select = document.getElementById('filter-employee');
@@ -412,7 +414,7 @@
       try {
         const password = sessionStorage.getItem('adminPasswordValue');
         const [empRes, docsRes] = await Promise.all([
-          fetch('/api/admin/employees'),
+          fetch('/api/admin/employees', { headers: { 'x-admin-password': password } }),
           fetch('/api/admin/employee-documents/all', { headers: { password } }),
         ]);
         const employees = await empRes.json();
@@ -614,7 +616,10 @@
       try {
         const response = await fetch('/api/admin/employees', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '',
+          },
           body: JSON.stringify({
             name, pin, email, phone, designation, contractorType,
             payType, hourlyWage,
@@ -1951,7 +1956,9 @@
       } else {
         empSel.innerHTML = '<option value="">Loading...</option>';
         try {
-          const res = await fetch('/api/admin/employees');
+          const res = await fetch('/api/admin/employees', {
+            headers: { 'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '' },
+          });
           if (res.ok) {
             window._employeesCache = await res.json();
           }
@@ -2108,7 +2115,7 @@
 
       try {
         const [empRes, docRes] = await Promise.all([
-          fetch('/api/admin/employees', { headers: { password } }),
+          fetch('/api/admin/employees', { headers: { 'x-admin-password': password } }),
           fetch('/api/admin/employee-documents/all', { headers: { password } }),
         ]);
         const employees = await empRes.json();
