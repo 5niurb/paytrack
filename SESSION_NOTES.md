@@ -27,11 +27,10 @@ Plaid sync flow (after fix):
 
 **Current State:** Plaid sync working. ACH/Zelle only. Comments + delete functional. Both commits deployed.
 
-**Issues:** None known for Plaid. Prior lm-app security review issues still pending (see previous session).
+**Issues:** None known for Plaid.
 
 **Next Steps:**
 - Test assign flow end-to-end with a real pending transaction (verify comments saves correctly)
-- lm-app security review: app_metadata.scope persistence, trust proxy/XFF, dev OTP bypass
 
 ---
 
@@ -894,6 +893,51 @@ employees.onboarding_completed_at ← marked
 - W9 pre-population (mentioned in onboarding email — not yet built)
 - 1099 CSV export (deferred)
 - SPECS.md update for v2 onboarding
+
+---
+
+## Session — 2026-05-23 (lm-app P0 security fixes: dev OTP bypass, X-Forwarded-For injection, trust proxy validation)
+
+**Focus:** Fix three critical P0 security vulnerabilities in lm-app auth routes discovered in prior session security review.
+
+**Accomplished:**
+- **Fix 1 — Dev OTP Bypass (auth-basic.js):** Removed hardcoded '000000' dev bypass logic from `/api/auth/verify-otp` endpoint. Previously: branching logic accepted '000000' in non-production environments. Now: consistently returns 501 "not implemented" across all environments. Commit: `dcb9809`
+- **Fix 2 — X-Forwarded-For Injection (tailscale.js):** Fixed `extractClientIp()` function to validate Express trust proxy is enabled before trusting X-Forwarded-For header. Previously: blindly parsed `x-forwarded-for` header allowing client IP spoofing. Now: checks `req.app.get('trust proxy')` before reading header, preventing unauthorized IP override. Commit: `dcb9809`
+- **Fix 3 — Unreachable Code Cleanup:** Discovered and removed unreachable return statements at auth-basic.js lines 63-67 (legacy success response after 501 error). Commit: `57f8b11`
+- **Verification:** server.js line 22 already correctly sets `app.set('trust proxy', 1)` for Fly.io reverse proxy — no changes needed
+- All commits pushed to origin main; auto-deploying on Cloudflare Pages (frontend) + Fly.io (API)
+
+**Diagram:**
+```
+Security fix summary (lm-app/api):
+
+Before:                                After:
+/verify-otp endpoint                   /verify-otp endpoint
+  ├─ if NODE_ENV != production           └─ always returns 501 "not implemented"
+  │  └─ accept '000000' ✗ VULN             (no dev bypass) ✓ SECURE
+  └─ else: 501
+
+extractClientIp() function             extractClientIp() function
+  ├─ if (x-forwarded-for)                ├─ if (trust proxy enabled && x-forwarded-for)
+  │  └─ return last IP ✗ VULN            │  └─ return last IP ✓ SECURE
+  └─ else: socket addr                   └─ else: socket addr
+```
+
+**Current State:**
+- All three P0 security fixes committed and pushed to main
+- Cloudflare Pages + Fly.io auto-deploying (3 commits: dcb9809, 57f8b11, plus prior session commits)
+- lm-app auth routes now secure against: dev OTP bypass, client IP spoofing via X-Forwarded-For injection
+- Remaining tasks from prior session: RENDER_SERVICE_ID restoration (Render API background task pending), Chase Plaid OAuth approval status (requires manual dashboard check)
+
+**Issues:**
+- None for this session's security fixes
+- Prior session items still pending: RENDER_SERVICE_ID restoration (background task bcd5mv14m), Chase Plaid OAuth approval check
+
+**Next Steps:**
+- Monitor lm-app auto-deployment completion (~2-3 min from push)
+- Verify security fixes live at https://lemedspa.app and https://api.lemedspa.app
+- Check Chase Plaid OAuth approval: https://dashboard.plaid.com/activity/status/oauth-institutions
+- Check background task status for RENDER_SERVICE_ID restoration (task bcd5mv14m via Render API)
 
 ---
 

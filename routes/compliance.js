@@ -502,4 +502,290 @@ router.post('/coi-inbound', emailUpload.single('file'), async (req, res) => {
   })();
 });
 
+// ─────────────────────────────────────────────
+// POST /api/compliance/check-license
+// Trigger professional license verification via BreEZe
+// ─────────────────────────────────────────────
+router.post('/check-license', async (req, res) => {
+  const { password } = req.headers;
+  if (password !== adminPassword) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const { employee_id, manual_query_params } = req.body;
+  if (!employee_id) {
+    return res.status(400).json({ error: 'employee_id required' });
+  }
+
+  res.json({ success: true, status: 'check_queued' });
+
+  // Fire-and-forget: query BreEZe, store result, send notification
+  setImmediate(async () => {
+    try {
+      const breezeClient = await import('../lib/breeze-client.mjs');
+      const { data: emp, error: empErr } = await supabase
+        .from('employees')
+        .select('id, name, email, phone, professional_license, professional_title, license_number, license_state')
+        .eq('id', employee_id)
+        .single();
+
+      if (empErr || !emp) {
+        console.error('check-license: employee not found for id:', employee_id);
+        return;
+      }
+
+      // Use manual params if provided (admin override), else use employee record
+      const profession = manual_query_params?.profession || emp.professional_title || 'unknown';
+      const licenseNumber = manual_query_params?.licenseNumber || emp.license_number;
+      const firstName = manual_query_params?.firstName || emp.name?.split(' ')[0];
+      const lastName = manual_query_params?.lastName || emp.name?.split(' ')[1];
+
+      if (!licenseNumber && !firstName && !lastName) {
+        console.warn('check-license: insufficient data to query license for employee:', employee_id);
+        return;
+      }
+
+      const result = await breezeClient.queryLicense(profession, { licenseNumber, firstName, lastName });
+
+      // Store result in compliance_documents
+      await supabase
+        .from('compliance_documents')
+        .upsert({
+          employee_id,
+          document_type: 'license',
+          license_status: result.status,
+          license_verified_at: result.verified_at || new Date().toISOString(),
+          license_profession: result.profession,
+          status: result.status === 'valid' ? 'approved' : 'pending',
+        }, {
+          onConflict: 'employee_id,document_type',
+        });
+
+      // Send appropriate notification
+      const n = await getNotifier();
+      if (result.status === 'valid') {
+        await n.sendLicenseValid({
+          to_email: emp.email,
+          worker_name: emp.name,
+          profession: result.profession,
+          expiry_date: result.expiryDate,
+        });
+      } else if (result.status === 'expired') {
+        await n.sendLicenseRenewalDue({
+          to_email: emp.email,
+          to_phone: emp.phone,
+          worker_name: emp.name,
+          profession: result.profession,
+          expiry_date: result.expiryDate,
+          state: emp.license_state || 'California',
+        });
+      } else {
+        // invalid or not_found
+        await n.sendLicenseInvalid({
+          to_email: emp.email,
+          worker_name: emp.name,
+          profession: result.profession,
+        });
+      }
+    } catch (err) {
+      console.error('check-license error (employee_id=%s):', employee_id, err.message);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────
+// POST /api/compliance/esign-request
+// Create e-signature submission for W9 or Contract
+// ─────────────────────────────────────────────
+router.post('/esign-request', async (req, res) => {
+  const { password } = req.headers;
+  if (password !== adminPassword) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const { employee_id, document_type } = req.body;
+  if (!employee_id || !document_type) {
+    return res.status(400).json({ error: 'employee_id and document_type required' });
+  }
+  if (!['w9', 'contract'].includes(document_type)) {
+    return res.status(400).json({ error: 'document_type must be w9 or contract' });
+  }
+
+  res.json({ success: true, status: 'esign_requested' });
+
+  // Fire-and-forget: create Docuseal submission, send link via email/SMS
+  setImmediate(async () => {
+    try {
+      const docusealClient = await import('../lib/docuseal-client.mjs');
+
+      const { data: emp, error: empErr } = await supabase
+        .from('employees')
+        .select('id, name, email, phone')
+        .eq('id', employee_id)
+        .single();
+
+      if (empErr || !emp) {
+        console.error('esign-request: employee not found for id:', employee_id);
+        return;
+      }
+
+      // Docuseal template ID should be in env or config
+      const templateId = document_type === 'w9' ? process.env.DOCUSEAL_TEMPLATE_W9 : process.env.DOCUSEAL_TEMPLATE_CONTRACT;
+      if (!templateId) {
+        console.error(`esign-request: DOCUSEAL_TEMPLATE_${document_type.toUpperCase()} not configured`);
+        return;
+      }
+
+      // Create submission
+      const submission = await docusealClient.createSubmission(templateId, {
+        worker_name: emp.name,
+        worker_email: emp.email,
+        document_type,
+      });
+
+      // Create compliance_documents record
+      const { data: doc, error: docErr } = await supabase
+        .from('compliance_documents')
+        .insert({
+          employee_id,
+          document_type,
+          status: 'pending',
+          docuseal_submission_id: submission.submissionId,
+        })
+        .select()
+        .single();
+
+      if (docErr) {
+        console.error('esign-request: failed to create compliance_documents:', docErr.message);
+        return;
+      }
+
+      // Create compliance_requests token for tracking
+      const { token, expires_at } = generateToken();
+      await supabase.from('compliance_requests').insert({
+        employee_id,
+        type: 'esign',
+        document_type,
+        token,
+        expires_at,
+        external_id: submission.submissionId,
+      });
+
+      // Send e-sign request notification
+      const n = await getNotifier();
+      await n.sendESignRequest({
+        to_email: emp.email,
+        to_phone: emp.phone,
+        worker_name: emp.name,
+        document_type,
+        esign_url: submission.publicLink,
+      });
+    } catch (err) {
+      console.error('esign-request error (employee_id=%s):', employee_id, err.message);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────
+// POST /api/compliance/esign-webhook
+// Docuseal webhook handler for signature completion
+// ─────────────────────────────────────────────
+router.post('/esign-webhook', async (req, res) => {
+  const signature = req.headers['x-docuseal-signature'];
+  const payload = JSON.stringify(req.body);
+
+  const docusealClient = await import('../lib/docuseal-client.mjs');
+  const isValid = docusealClient.verifyWebhookSignature(signature, payload);
+
+  if (!isValid) {
+    console.warn('esign-webhook: invalid signature');
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  // Parse event
+  const { event_type, submission_id, document_type, employee_id } = req.body;
+  if (event_type !== 'submission_completed') {
+    // Ignore other events
+    return res.json({ success: true });
+  }
+
+  res.json({ success: true });
+
+  // Fire-and-forget: update compliance_documents, mark employee signed, send confirmation
+  setImmediate(async () => {
+    try {
+      // Update compliance_documents
+      const { data: doc, error: docErr } = await supabase
+        .from('compliance_documents')
+        .update({
+          status: 'signed',
+          docuseal_completed_at: new Date().toISOString(),
+        })
+        .eq('docuseal_submission_id', submission_id)
+        .select()
+        .single();
+
+      if (docErr) {
+        console.error('esign-webhook: failed to update compliance_documents:', docErr.message);
+        return;
+      }
+
+      // Update employees table: mark w9_signed or contract_signed
+      const updateField = document_type === 'w9' ? 'w9_signed' : 'contract_signed';
+      await supabase
+        .from('employees')
+        .update({ [updateField]: true })
+        .eq('id', doc.employee_id);
+
+      // Mark compliance_requests token as used
+      await supabase
+        .from('compliance_requests')
+        .update({ used_at: new Date().toISOString() })
+        .eq('external_id', submission_id);
+
+      // Send confirmation notification
+      const { data: emp } = await supabase
+        .from('employees')
+        .select('name, email')
+        .eq('id', doc.employee_id)
+        .single();
+
+      if (emp) {
+        const n = await getNotifier();
+        await n.sendESignComplete({
+          to_email: emp.email,
+          worker_name: emp.name,
+          document_type,
+        });
+      }
+    } catch (err) {
+      console.error('esign-webhook error (submission_id=%s):', submission_id, err.message);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────
+// POST /api/compliance/scan
+// Nightly orchestrator: triggers all three compliance workflows
+// ─────────────────────────────────────────────
+router.post('/scan', async (req, res) => {
+  const cronSecret = req.headers['x-cron-secret'];
+  if (cronSecret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  res.json({ success: true, status: 'scan_started' });
+
+  // Fire-and-forget: run full compliance scan
+  setImmediate(async () => {
+    try {
+      const scanModule = await import('../lib/compliance-scan.mjs');
+      const result = await scanModule.runComplianceScan(supabase);
+      console.log('Compliance scan complete:', result);
+    } catch (err) {
+      console.error('compliance scan error:', err.message);
+    }
+  });
+});
+
 module.exports = { router, init };
