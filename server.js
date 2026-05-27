@@ -824,7 +824,8 @@ app.get('/api/pay-period/:employeeId', async (req, res) => {
   }
 
   const periodOffset = parseInt(offset) || 0;
-  const period = getPayPeriodByOffset(periodOffset);
+  const laToday = getLATodayString();
+  const period = getPayPeriodByOffset(periodOffset, laToday);
 
   const startDate = formatDateForDB(period.start);
   const endDate = formatDateForDB(period.end);
