@@ -1115,28 +1115,52 @@ app.post('/api/submit-invoice', async (req, res) => {
     totalPayouts += parseFloat(p.amount || 0);
   }
 
+  // Batch query: get all client entries and product sales (avoid N+1 query pattern)
+  const emailEntryIds = (emailEntries || []).map(e => e.id);
+
+  const { data: allEmailClients } = emailEntryIds.length > 0
+    ? await supabaseAdmin
+        .from('client_entries')
+        .select('time_entry_id, amount_earned, tip_amount, tip_received_cash')
+        .in('time_entry_id', emailEntryIds)
+    : { data: [] };
+
+  const { data: allEmailSales } = emailEntryIds.length > 0
+    ? await supabaseAdmin
+        .from('product_sales')
+        .select('time_entry_id, commission_amount')
+        .in('time_entry_id', emailEntryIds)
+    : { data: [] };
+
+  // Group results by time_entry_id for fast lookup
+  const emailClientsByEntry = {};
+  const emailSalesByEntry = {};
+
+  (allEmailClients || []).forEach(c => {
+    if (!emailClientsByEntry[c.time_entry_id]) emailClientsByEntry[c.time_entry_id] = [];
+    emailClientsByEntry[c.time_entry_id].push(c);
+  });
+
+  (allEmailSales || []).forEach(s => {
+    if (!emailSalesByEntry[s.time_entry_id]) emailSalesByEntry[s.time_entry_id] = [];
+    emailSalesByEntry[s.time_entry_id].push(s);
+  });
+
   const detailedEntries = [];
   for (const entry of (emailEntries || [])) {
-    const { data: clients } = await supabaseAdmin
-      .from('client_entries')
-      .select('amount_earned, tip_amount, tip_received_cash')
-      .eq('time_entry_id', entry.id);
-
-    const { data: sales } = await supabaseAdmin
-      .from('product_sales')
-      .select('commission_amount')
-      .eq('time_entry_id', entry.id);
+    const clients = emailClientsByEntry[entry.id] || [];
+    const sales = emailSalesByEntry[entry.id] || [];
 
     let dayCommissions = 0;
     let dayTips = 0;
     let dayCashTips = 0;
-    for (const c of (clients || [])) {
+    for (const c of clients) {
       dayCommissions += c.amount_earned || 0;
       dayTips += c.tip_amount || 0;
       if (c.tip_received_cash) dayCashTips += c.tip_amount || 0;
     }
     let dayProductCommissions = 0;
-    for (const s of (sales || [])) {
+    for (const s of sales) {
       dayProductCommissions += s.commission_amount || 0;
     }
     const dayPayouts = payoutsByDate[entry.date] || 0;
