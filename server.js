@@ -3,7 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const crypto = require('crypto');
 const compression = require('compression');
 
@@ -40,6 +40,13 @@ const verifyAdminPassword = (provided, expected) => {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust the single reverse proxy in front of us (Render's load balancer) so
+// req.ip reflects the real client IP from X-Forwarded-For instead of the proxy
+// IP. Without this, every request shares the proxy's IP and the rate limiter
+// buckets all clients together. Trust exactly 1 hop — never `true`, which would
+// trust spoofed X-Forwarded-For headers.
+app.set('trust proxy', 1);
 
 // Middleware
 // Compression: gzip static assets and API responses (60-70% payload reduction)
@@ -82,21 +89,17 @@ app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,  // Enable ETags for cache validation
 }));
 
-// Cache control middleware for API responses
+// Cache control for API responses.
+// All /api/ responses are per-employee dynamic data (time entries, pay periods,
+// invoices, payouts, PII/banking, signed URLs). Caching them client-side risks
+// (1) stale data after an edit looking like a failed save and (2) `public` shared
+// caches storing one user's payroll/PII and serving it to another. So we never
+// cache API responses. Payload size is already reduced by gzip compression above;
+// static assets still get ETag/maxAge caching via express.static.
 app.use('/api/', (req, res, next) => {
-  // Set cache headers based on request method and path
-  if (req.method === 'GET') {
-    // Cache GET requests for 5 minutes (reduce repeated queries)
-    const cacheMaxAge = req.path.includes('/pay-period') || req.path.includes('/entries')
-      ? 5 * 60 // 5 minutes for time-sensitive data
-      : 10 * 60; // 10 minutes for less volatile data
-    res.set('Cache-Control', `public, max-age=${cacheMaxAge}`);
-  } else {
-    // Don't cache POST/PUT/DELETE responses
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-  }
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   next();
 });
 
@@ -104,7 +107,12 @@ app.use('/api/', (req, res, next) => {
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // 10 attempts per window
-  keyGenerator: (req) => req.headers['x-admin-password'] || req.headers.password || req.ip,
+  // Rate-limit by normalized client IP. We deliberately do NOT key on the
+  // submitted admin password — doing so would give an attacker a fresh bucket
+  // per password guess, defeating the brute-force protection this limiter
+  // exists to provide. ipKeyGenerator buckets IPv6 by /64 prefix so it can't be
+  // bypassed by varying low-order bits (ERR_ERL_KEY_GEN_IPV6).
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
   skip: (req) => {
     return !req.path.startsWith('/api/admin')
       && !req.path.startsWith('/api/compliance')
