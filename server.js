@@ -1624,10 +1624,11 @@ app.delete('/api/admin/employees/:id', async (req, res) => {
     .select('id')
     .eq('employee_id', parseInt(id));
 
-  // Delete related records
-  for (const entry of (timeEntries || [])) {
-    await supabaseAdmin.from('product_sales').delete().eq('time_entry_id', entry.id);
-    await supabaseAdmin.from('client_entries').delete().eq('time_entry_id', entry.id);
+  // Delete related records in batch (O(1) instead of O(n))
+  const entryIds = (timeEntries || []).map(e => e.id);
+  if (entryIds.length > 0) {
+    await supabaseAdmin.from('product_sales').delete().in('time_entry_id', entryIds);
+    await supabaseAdmin.from('client_entries').delete().in('time_entry_id', entryIds);
   }
 
   await supabaseAdmin.from('invoices').delete().eq('employee_id', parseInt(id));
