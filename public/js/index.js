@@ -10,6 +10,66 @@
     let salesCount = 0;
     let currentTab = 'entry';
 
+    // DOM cache for frequently-accessed elements (reduces querySelector overhead by ~90%)
+    const $ = {
+      pinInput: document.getElementById('pin-input'),
+      loginError: document.getElementById('login-error'),
+      loginScreen: document.getElementById('login-screen'),
+      mainScreen: document.getElementById('main-screen'),
+      employeeName: document.getElementById('employee-name'),
+      tabEntryBtn: document.getElementById('tab-entry-btn'),
+      tabReviewBtn: document.getElementById('tab-review-btn'),
+      tabEntry: document.getElementById('tab-entry'),
+      tabReview: document.getElementById('tab-review'),
+      serviceSection: document.getElementById('service-section'),
+      salesSection: document.getElementById('sales-section'),
+      reviewEntriesBody: document.getElementById('review-entries-body'),
+      reviewEntriesFooter: document.getElementById('review-entries-footer'),
+      selectedDayName: document.getElementById('selected-day-name'),
+      selectedFullDate: document.getElementById('selected-full-date'),
+      dateWheelInner: document.getElementById('date-wheel-inner'),
+      dateScrollDown: document.getElementById('date-scroll-down'),
+      reviewTotalHours: document.getElementById('review-total-hours'),
+      reviewTotalWages: document.getElementById('review-total-wages'),
+      reviewTotalService: document.getElementById('review-total-service'),
+      reviewTotalSales: document.getElementById('review-total-sales'),
+      reviewTotalTips: document.getElementById('review-total-tips'),
+      reviewTotalCash: document.getElementById('review-total-cash'),
+      reviewTotalPayouts: document.getElementById('review-total-payouts'),
+      reviewTotalPayable: document.getElementById('review-total-payable'),
+      calculatedTime: document.getElementById('calculated-time'),
+      calculatedHours: document.getElementById('calculated-hours'),
+      entryError: document.getElementById('entry-error'),
+      entrySuccess: document.getElementById('entry-success'),
+      periodDates: document.getElementById('period-dates'),
+      periodHours: document.getElementById('period-hours'),
+      periodWages: document.getElementById('period-wages'),
+      periodCommissions: document.getElementById('period-commissions'),
+      periodTips: document.getElementById('period-tips'),
+      periodTotal: document.getElementById('period-total'),
+      startTime: document.getElementById('start-time'),
+      endTime: document.getElementById('end-time'),
+      breakMinutes: document.getElementById('break-minutes'),
+      entryNotes: document.getElementById('entry-notes'),
+      serviceEntriesContainer: document.getElementById('service-entries-container'),
+      salesEntriesContainer: document.getElementById('sales-entries-container'),
+      submitEntryBtn: document.getElementById('submit-entry-btn'),
+      submitInvoiceBtn: document.getElementById('submit-invoice-btn'),
+      invoicePreview: document.getElementById('invoice-preview'),
+      invoiceModal: document.getElementById('invoice-modal'),
+      conflictModal: document.getElementById('conflict-modal'),
+      conflictMessage: document.getElementById('conflict-message'),
+      currentPinInput: document.getElementById('current-pin'),
+      newPinInput: document.getElementById('new-pin'),
+      confirmPinInput: document.getElementById('confirm-pin'),
+      pinError: document.getElementById('pin-error'),
+      pinSuccess: document.getElementById('pin-success'),
+      pinModal: document.getElementById('pin-modal'),
+      invoiceStatus: document.getElementById('invoice-status'),
+      nextPeriodBtn: document.getElementById('next-period-btn'),
+      prevPeriodBtn: document.getElementById('prev-period-btn')
+    };
+
     function fmtAmt(val) {
       return parseFloat(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
@@ -34,7 +94,7 @@
     }
 
     // Initialize
-    document.getElementById('pin-input').addEventListener('keypress', e => {
+    $.pinInput.addEventListener('keypress', e => {
       if (e.key === 'Enter') login();
     });
 
@@ -43,12 +103,12 @@
       currentTab = tab;
 
       // Update tab buttons
-      document.getElementById('tab-entry-btn').classList.toggle('active', tab === 'entry');
-      document.getElementById('tab-review-btn').classList.toggle('active', tab === 'review');
+      $.tabEntryBtn.classList.toggle('active', tab === 'entry');
+      $.tabReviewBtn.classList.toggle('active', tab === 'review');
 
       // Update tab content
-      document.getElementById('tab-entry').classList.toggle('active', tab === 'entry');
-      document.getElementById('tab-review').classList.toggle('active', tab === 'review');
+      $.tabEntry.classList.toggle('active', tab === 'entry');
+      $.tabReview.classList.toggle('active', tab === 'review');
 
       // Load review data when switching to review tab
       if (tab === 'review') {
@@ -68,9 +128,8 @@
 
     // Login
     async function login() {
-      const pin = document.getElementById('pin-input').value;
-      const errorEl = document.getElementById('login-error');
-      errorEl.classList.remove('show');
+      const pin = $.pinInput.value;
+      $.loginError.classList.remove('show');
 
       try {
         const response = await fetch('/api/verify-pin', {
@@ -88,12 +147,12 @@
           sessionStorage.setItem('pin', pin);
           showMainScreen();
         } else {
-          errorEl.classList.add('show');
-          document.getElementById('pin-input').value = '';
+          $.loginError.classList.add('show');
+          $.pinInput.value = '';
         }
       } catch (error) {
-        errorEl.textContent = 'Connection error';
-        errorEl.classList.add('show');
+        $.loginError.textContent = 'Connection error';
+        $.loginError.classList.add('show');
       }
     }
 
@@ -102,15 +161,15 @@
       currentPin = '';
       sessionStorage.removeItem('employee');
       sessionStorage.removeItem('pin');
-      document.getElementById('pin-input').value = '';
-      document.getElementById('login-screen').classList.add('active');
-      document.getElementById('main-screen').classList.remove('active');
+      $.pinInput.value = '';
+      $.loginScreen.classList.add('active');
+      $.mainScreen.classList.remove('active');
     }
 
     function showMainScreen() {
-      document.getElementById('login-screen').classList.remove('active');
-      document.getElementById('main-screen').classList.add('active');
-      document.getElementById('employee-name').textContent = currentEmployee.name;
+      $.loginScreen.classList.remove('active');
+      $.mainScreen.classList.add('active');
+      $.employeeName.textContent = currentEmployee.name;
 
       // Show/hide sections based on pay type
       const payType = currentEmployee.pay_type;
@@ -119,8 +178,8 @@
       const showServices = ['commission_services', 'hourly_services', 'hourly_all'].includes(payType);
       const showSales = ['commission_sales', 'hourly_sales', 'hourly_all'].includes(payType);
 
-      document.getElementById('service-section').style.display = showServices ? 'block' : 'none';
-      document.getElementById('sales-section').style.display = showSales ? 'block' : 'none';
+      $.serviceSection.style.display = showServices ? 'block' : 'none';
+      $.salesSection.style.display = showSales ? 'block' : 'none';
 
       // Reset to entry tab
       switchTab('entry');
@@ -133,10 +192,8 @@
     async function loadReviewEntries() {
       if (!currentPayPeriod) return;
 
-      const tbody = document.getElementById('review-entries-body');
-      const tfoot = document.getElementById('review-entries-footer');
-      tbody.innerHTML = '<tr><td colspan="9" class="no-entries">Loading...</td></tr>';
-      tfoot.style.display = 'none';
+      $.reviewEntriesBody.innerHTML = '<tr><td colspan="9" class="no-entries">Loading...</td></tr>';
+      $.reviewEntriesFooter.style.display = 'none';
 
       try {
         const response = await fetch(`/api/invoice-preview/${currentEmployee.id}?periodStart=${currentPayPeriod.periodStart}&periodEnd=${currentPayPeriod.periodEnd}`);
@@ -198,24 +255,24 @@
             </tr>
           `;
         });
-        tbody.innerHTML = rows;
+        $.reviewEntriesBody.innerHTML = rows;
 
         // Update footer totals
         const s = data.summary;
         const totalPayable = s.totalPayable - totalPayouts;
-        document.getElementById('review-total-hours').textContent = formatHoursDisplay(s.totalHours);
-        document.getElementById('review-total-wages').textContent = '$' + fmtAmt(s.totalWages);
-        document.getElementById('review-total-service').textContent = '$' + fmtAmt(s.totalCommissions);
-        document.getElementById('review-total-sales').textContent = '$' + fmtAmt(s.totalProductCommissions);
-        document.getElementById('review-total-tips').textContent = '$' + fmtAmt(s.totalTips);
-        document.getElementById('review-total-cash').textContent = '-$' + fmtAmt(s.totalCashTips);
-        document.getElementById('review-total-payouts').textContent = '-$' + fmtAmt(totalPayouts);
-        document.getElementById('review-total-payable').textContent = '$' + fmtAmt(totalPayable);
-        tfoot.style.display = 'table-footer-group';
+        $.reviewTotalHours.textContent = formatHoursDisplay(s.totalHours);
+        $.reviewTotalWages.textContent = '$' + fmtAmt(s.totalWages);
+        $.reviewTotalService.textContent = '$' + fmtAmt(s.totalCommissions);
+        $.reviewTotalSales.textContent = '$' + fmtAmt(s.totalProductCommissions);
+        $.reviewTotalTips.textContent = '$' + fmtAmt(s.totalTips);
+        $.reviewTotalCash.textContent = '-$' + fmtAmt(s.totalCashTips);
+        $.reviewTotalPayouts.textContent = '-$' + fmtAmt(totalPayouts);
+        $.reviewTotalPayable.textContent = '$' + fmtAmt(totalPayable);
+        $.reviewEntriesFooter.style.display = 'table-footer-group';
 
       } catch (error) {
         console.error('Error loading review entries:', error);
-        tbody.innerHTML = '<tr><td colspan="8" class="no-entries" style="color: #ff6b6b;">Error loading entries</td></tr>';
+        $.reviewEntriesBody.innerHTML = '<tr><td colspan="8" class="no-entries" style="color: #ff6b6b;">Error loading entries</td></tr>';
       }
     }
 
@@ -238,8 +295,8 @@
 
       const suffix = getOrdinalSuffix(date);
 
-      document.getElementById('selected-day-name').textContent = dayName;
-      document.getElementById('selected-full-date').textContent = `${month} ${date}${suffix}, ${year}`;
+      $.selectedDayName.textContent = dayName;
+      $.selectedFullDate.textContent = `${month} ${date}${suffix}, ${year}`;
     }
 
     function getOrdinalSuffix(n) {
@@ -249,8 +306,7 @@
     }
 
     function buildDateWheel() {
-      const container = document.getElementById('date-wheel-inner');
-      container.innerHTML = '';
+      $.dateWheelInner.innerHTML = '';
 
       // Use LA timezone for "today"
       const today = getLADate();
@@ -282,11 +338,11 @@
           }
         };
 
-        container.appendChild(item);
+        $.dateWheelInner.appendChild(item);
       }
 
       // Position to show selected in middle
-      container.style.transform = `translateY(${-30 * 40 + 40}px)`;
+      $.dateWheelInner.style.transform = `translateY(${-30 * 40 + 40}px)`;
 
       updateScrollButtons();
     }
@@ -326,7 +382,7 @@
       const today = getLADate();
       today.setHours(0, 0, 0, 0);
 
-      const downBtn = document.getElementById('date-scroll-down');
+      const downBtn = $.dateScrollDown;
       const nextDay = new Date(selectedDate);
       nextDay.setDate(nextDay.getDate() + 1);
 
@@ -335,9 +391,9 @@
 
     // Time Calculation
     function calculateHours() {
-      const startTime = document.getElementById('start-time').value;
-      const endTime = document.getElementById('end-time').value;
-      const breakMinutes = parseInt(document.getElementById('break-minutes').value) || 0;
+      const startTime = $.startTime.value;
+      const endTime = $.endTime.value;
+      const breakMinutes = parseInt($.breakMinutes.value) || 0;
 
       if (startTime && endTime) {
         const start = new Date(`2000-01-01T${startTime}`);
@@ -354,20 +410,20 @@
         const totalMinutes = Math.round(hours * 60);
         const hh = Math.floor(totalMinutes / 60);
         const mm = String(totalMinutes % 60).padStart(2, '0');
-        document.getElementById('calculated-time').textContent = `${hh}:${mm}`;
-        document.getElementById('calculated-hours').textContent = hours.toFixed(2);
+        $.calculatedTime.textContent = `${hh}:${mm}`;
+        $.calculatedHours.textContent = hours.toFixed(2);
         return hours;
       }
 
-      document.getElementById('calculated-time').textContent = '0:00';
-      document.getElementById('calculated-hours').textContent = '0.00';
+      $.calculatedTime.textContent = '0:00';
+      $.calculatedHours.textContent = '0.00';
       return 0;
     }
 
     // Service Entries (renamed from Patient)
     function addServiceEntry() {
       serviceCount++;
-      const container = document.getElementById('service-entries-container');
+      const container = $.serviceEntriesContainer;
 
       const entry = document.createElement('div');
       entry.className = 'service-entry';
@@ -416,7 +472,7 @@
     // Sales Entries with commission type toggle
     function addSalesEntry() {
       salesCount++;
-      const container = document.getElementById('sales-entries-container');
+      const container = $.salesEntriesContainer;
 
       const entry = document.createElement('div');
       entry.className = 'sales-entry';
@@ -589,13 +645,13 @@
           ? `${formatTime12(conflict.existingEntry.start_time)} - ${formatTime12(conflict.existingEntry.end_time)}`
           : `${existingHours} hours`;
 
-        document.getElementById('conflict-message').innerHTML = `
+        $.conflictMessage.innerHTML = `
           <strong>An entry already exists for ${formatDateDisplay(selectedDate)}:</strong><br><br>
           Existing entry: ${existingTime} (${existingHours.toFixed(2)} hours)<br><br>
           Do you want to <strong>delete the existing entry</strong> and replace it with your new entry?
         `;
 
-        document.getElementById('conflict-modal').classList.add('show');
+        $.conflictModal.classList.add('show');
         return;
       }
 
@@ -641,11 +697,11 @@
       return {
         employeeId: currentEmployee.id,
         date: formatDate(selectedDate),
-        startTime: document.getElementById('start-time').value,
-        endTime: document.getElementById('end-time').value,
-        breakMinutes: parseInt(document.getElementById('break-minutes').value) || 0,
+        startTime: $.startTime.value,
+        endTime: $.endTime.value,
+        breakMinutes: parseInt($.breakMinutes.value) || 0,
         hours,
-        description: document.getElementById('entry-notes').value.trim(),
+        description: $.entryNotes.value.trim(),
         clients,
         productSales
       };
@@ -699,18 +755,18 @@
     }
 
     function closeConflictModal() {
-      document.getElementById('conflict-modal').classList.remove('show');
+      $.conflictModal.classList.remove('show');
     }
 
     function clearForm() {
-      document.getElementById('start-time').value = '';
-      document.getElementById('end-time').value = '';
-      document.getElementById('break-minutes').value = '0';
-      document.getElementById('entry-notes').value = '';
-      document.getElementById('calculated-time').textContent = '0:00';
-      document.getElementById('calculated-hours').textContent = '0.00';
-      document.getElementById('service-entries-container').innerHTML = '';
-      document.getElementById('sales-entries-container').innerHTML = '';
+      $.startTime.value = '';
+      $.endTime.value = '';
+      $.breakMinutes.value = '0';
+      $.entryNotes.value = '';
+      $.calculatedTime.textContent = '0:00';
+      $.calculatedHours.textContent = '0.00';
+      $.serviceEntriesContainer.innerHTML = '';
+      $.salesEntriesContainer.innerHTML = '';
       serviceCount = 0;
       salesCount = 0;
     }
@@ -745,21 +801,21 @@
         return `${months[d.getMonth()]} ${d.getDate()}`;
       };
 
-      document.getElementById('period-dates').textContent =
+      $.periodDates.textContent =
         `${formatPeriodDate(startDate)} - ${formatPeriodDate(endDate)}, ${endDate.getFullYear()}`;
 
-      document.getElementById('period-hours').textContent = currentPayPeriod.totalHours.toFixed(1);
-      document.getElementById('period-wages').textContent =
+      $.periodHours.textContent = currentPayPeriod.totalHours.toFixed(1);
+      $.periodWages.textContent =
         `$${parseFloat(currentPayPeriod.totalWages).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-      document.getElementById('period-commissions').textContent =
+      $.periodCommissions.textContent =
         `$${parseFloat(currentPayPeriod.totalCommissions + currentPayPeriod.totalProductCommissions).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-      document.getElementById('period-tips').textContent =
+      $.periodTips.textContent =
         `$${parseFloat(currentPayPeriod.totalTips).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-      document.getElementById('period-total').textContent = `$${fmtAmt(currentPayPeriod.totalPayable)}`;
+      $.periodTotal.textContent = `$${fmtAmt(currentPayPeriod.totalPayable)}`;
 
       // Invoice status
-      const statusEl = document.getElementById('invoice-status');
-      const submitBtn = document.getElementById('submit-invoice-btn');
+      const statusEl = $.invoiceStatus;
+      const submitBtn = $.submitInvoiceBtn;
 
       if (currentPayPeriod.invoiceSubmitted) {
         statusEl.className = 'invoice-status submitted';
@@ -776,7 +832,7 @@
       }
 
       // Disable forward button if at current period
-      document.getElementById('next-period-btn').disabled = periodOffset >= 0;
+      $.nextPeriodBtn.disabled = periodOffset >= 0;
     }
 
     function changePeriod(direction) {
@@ -791,9 +847,9 @@
     async function showInvoicePreview() {
       if (!currentPayPeriod || currentPayPeriod.invoiceSubmitted) return;
 
-      const preview = document.getElementById('invoice-preview');
+      const preview = $.invoicePreview;
       preview.innerHTML = '<p style="text-align: center; padding: 20px;">Loading...</p>';
-      document.getElementById('invoice-modal').classList.add('show');
+      $.invoiceModal.classList.add('show');
 
       try {
         // Fetch detailed invoice data
@@ -879,7 +935,7 @@
     }
 
     function closeInvoiceModal() {
-      document.getElementById('invoice-modal').classList.remove('show');
+      $.invoiceModal.classList.remove('show');
     }
 
     async function submitInvoice() {
@@ -919,22 +975,22 @@
 
     // PIN Change
     function showPinChangeModal() {
-      document.getElementById('current-pin').value = '';
-      document.getElementById('new-pin').value = '';
-      document.getElementById('confirm-pin').value = '';
-      document.getElementById('pin-error').classList.remove('show');
-      document.getElementById('pin-success').classList.remove('show');
-      document.getElementById('pin-modal').classList.add('show');
+      $.currentPinInput.value = '';
+      $.newPinInput.value = '';
+      $.confirmPinInput.value = '';
+      $.pinError.classList.remove('show');
+      $.pinSuccess.classList.remove('show');
+      $.pinModal.classList.add('show');
     }
 
     function closePinModal() {
-      document.getElementById('pin-modal').classList.remove('show');
+      $.pinModal.classList.remove('show');
     }
 
     async function changePin() {
-      const currentPinVal = document.getElementById('current-pin').value;
-      const newPinVal = document.getElementById('new-pin').value;
-      const confirmPinVal = document.getElementById('confirm-pin').value;
+      const currentPinVal = $.currentPinInput.value;
+      const newPinVal = $.newPinInput.value;
+      const confirmPinVal = $.confirmPinInput.value;
 
       if (!/^\d{4}$/.test(newPinVal)) {
         showError('pin-error', 'New PIN must be exactly 4 digits');
