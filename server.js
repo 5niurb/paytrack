@@ -1300,29 +1300,50 @@ app.get('/api/invoice-preview/:employeeId', async (req, res) => {
   let totalCashTips = 0;
   let totalProductCommissions = 0;
 
-  for (const entry of (entries || [])) {
-    const { data: clients } = await supabaseAdmin
-      .from('client_entries')
-      .select('client_name, procedure_name, amount_earned, tip_amount, tip_received_cash')
-      .eq('time_entry_id', entry.id);
+  // Batch query all client_entries and product_sales for O(1) lookup
+  const entryIds = (entries || []).map(e => e.id);
+  const { data: allClients } = entryIds.length > 0
+    ? await supabaseAdmin
+        .from('client_entries')
+        .select('time_entry_id, client_name, procedure_name, amount_earned, tip_amount, tip_received_cash')
+        .in('time_entry_id', entryIds)
+    : { data: [] };
 
-    const { data: products } = await supabaseAdmin
-      .from('product_sales')
-      .select('product_name, sale_amount, commission_amount')
-      .eq('time_entry_id', entry.id);
+  const { data: allProducts } = entryIds.length > 0
+    ? await supabaseAdmin
+        .from('product_sales')
+        .select('time_entry_id, product_name, sale_amount, commission_amount')
+        .in('time_entry_id', entryIds)
+    : { data: [] };
+
+  // Group by time_entry_id for O(1) lookup
+  const clientsByEntry = {};
+  const productsByEntry = {};
+  (allClients || []).forEach(c => {
+    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
+    clientsByEntry[c.time_entry_id].push(c);
+  });
+  (allProducts || []).forEach(p => {
+    if (!productsByEntry[p.time_entry_id]) productsByEntry[p.time_entry_id] = [];
+    productsByEntry[p.time_entry_id].push(p);
+  });
+
+  for (const entry of (entries || [])) {
+    const clients = clientsByEntry[entry.id] || [];
+    const products = productsByEntry[entry.id] || [];
 
     let dayCommissions = 0;
     let dayTips = 0;
     let dayCashTips = 0;
     let dayProductCommissions = 0;
 
-    for (const c of (clients || [])) {
+    for (const c of clients) {
       dayCommissions += c.amount_earned || 0;
       dayTips += c.tip_amount || 0;
       if (c.tip_received_cash) dayCashTips += c.tip_amount || 0;
     }
 
-    for (const p of (products || [])) {
+    for (const p of products) {
       dayProductCommissions += p.commission_amount || 0;
     }
 
@@ -1343,8 +1364,8 @@ app.get('/api/invoice-preview/:employeeId', async (req, res) => {
       productCommissions: dayProductCommissions,
       tips: dayTips,
       cashTips: dayCashTips,
-      clients: clients || [],
-      products: products || []
+      clients: clients,
+      products: products
     });
   }
 
