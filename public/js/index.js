@@ -610,7 +610,7 @@
       try {
         const response = await fetch('/api/check-conflict', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-employee-pin': currentPin },
           body: JSON.stringify({
             employeeId: currentEmployee.id,
             date: dateStr

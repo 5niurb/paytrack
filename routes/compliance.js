@@ -10,15 +10,24 @@ const COI_FIELDS = ['insurer_name', 'policy_number', 'expiration_date', 'per_occ
 // (avoids circular dependency with server.js and keeps secrets out of this file)
 let supabase;
 let adminPassword;
+let verifyAdminPassword;
 let notifier;
 let extractor;
 
-function init(supabaseClient, adminPwd) {
+function init(supabaseClient, adminPwd, verifyFn) {
   supabase = supabaseClient;
   adminPassword = adminPwd;
+  verifyAdminPassword = verifyFn;
   // Lazy-load ESM modules
   notifier = null; // loaded on first use
   extractor = null;
+}
+
+// Timing-safe admin password check. Falls back to false if the verify function
+// wasn't wired in, so a misconfiguration fails closed (denies) rather than open.
+function isAdmin(password) {
+  return typeof verifyAdminPassword === 'function'
+    && verifyAdminPassword(password, adminPassword);
 }
 
 async function getNotifier() {
@@ -251,7 +260,7 @@ router.post('/confirm/:token', async (req, res) => {
 // ─────────────────────────────────────────────
 router.get('/review', async (req, res) => {
   const { password } = req.headers;
-  if (password !== adminPassword) {
+  if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -270,7 +279,7 @@ router.get('/review', async (req, res) => {
 // ─────────────────────────────────────────────
 router.post('/review/:id/approve', async (req, res) => {
   const { password } = req.headers;
-  if (password !== adminPassword) {
+  if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -322,7 +331,7 @@ router.post('/review/:id/approve', async (req, res) => {
 // ─────────────────────────────────────────────
 router.post('/review/:id/reject', async (req, res) => {
   const { password } = req.headers;
-  if (password !== adminPassword) {
+  if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -396,7 +405,7 @@ router.get('/document/:token', async (req, res) => {
 // GET /api/compliance/document-admin/:doc_id — admin view of any document
 router.get('/document-admin/:doc_id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== adminPassword) {
+  if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -508,7 +517,7 @@ router.post('/coi-inbound', emailUpload.single('file'), async (req, res) => {
 // ─────────────────────────────────────────────
 router.post('/check-license', async (req, res) => {
   const { password } = req.headers;
-  if (password !== adminPassword) {
+  if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -599,7 +608,7 @@ router.post('/check-license', async (req, res) => {
 // ─────────────────────────────────────────────
 router.post('/esign-request', async (req, res) => {
   const { password } = req.headers;
-  if (password !== adminPassword) {
+  if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 

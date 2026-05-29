@@ -166,7 +166,7 @@ const supabaseAdmin = SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   : supabase; // fallback to anon if not set (dev only)
 
-initCompliance(supabaseAdmin, process.env.ADMIN_PASSWORD);
+initCompliance(supabaseAdmin, process.env.ADMIN_PASSWORD, verifyAdminPassword);
 app.use('/api/compliance', complianceRouter);
 
 // Plaid is optional — warn if not configured
@@ -176,7 +176,7 @@ if (!process.env.PLAID_CLIENT_ID || !process.env.PLAID_SECRET) {
 if (!process.env.RENDER_SERVICE_ID) {
   console.warn('Warning: RENDER_SERVICE_ID not set — Plaid cursor/token will not persist after sync');
 }
-initPlaid(supabaseAdmin, process.env.ADMIN_PASSWORD);
+initPlaid(supabaseAdmin, process.env.ADMIN_PASSWORD, verifyAdminPassword);
 app.use('/api/admin/plaid', plaidRouter);
 
 // Multer: memory storage — files buffered in memory, then pushed to Supabase Storage
@@ -216,9 +216,11 @@ app.get('/api/health', (req, res) => {
 
 // Invoice table image for MMS — fetched by Twilio when delivering the MMS
 app.get('/api/invoice-media/:invoiceId', async (req, res) => {
-  // Require admin authentication before exposing employee PII and financial data
+  // Require admin authentication before exposing employee PII and financial data.
+  // Uses the timing-safe helper; references process.env.ADMIN_PASSWORD directly
+  // because the ADMIN_PASSWORD const is declared later in the file (after this route).
   const password = req.headers['x-admin-password'] || req.headers.password;
-  if (!password || !crypto.timingSafeEqual(Buffer.from(password), Buffer.from(adminPassword || ''))) {
+  if (!verifyAdminPassword(password, process.env.ADMIN_PASSWORD)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -711,9 +713,13 @@ const pinRateLimit = rateLimit({
 app.post('/api/verify-pin', pinRateLimit, async (req, res) => {
   const { pin } = req.body;
 
+  // Select only the fields the client actually uses to render the app:
+  // id (subsequent authenticated calls), name (header), pay_type (which
+  // sections to show), hourly_wage (client-side earnings preview). Do not
+  // return email/commission_rate at login — they're unused by the client.
   const { data: employee, error } = await supabaseAdmin
     .from('employees')
-    .select('id, name, email, hourly_wage, commission_rate, pay_type')
+    .select('id, name, pay_type, hourly_wage')
     .eq('pin', pin)
     .single();
 
@@ -724,8 +730,9 @@ app.post('/api/verify-pin', pinRateLimit, async (req, res) => {
   }
 });
 
-// Change PIN
-app.post('/api/change-pin', async (req, res) => {
+// Change PIN — rate-limited because it accepts employeeId+currentPin and would
+// otherwise allow unthrottled brute-force of a known employee's 4-digit PIN.
+app.post('/api/change-pin', pinRateLimit, async (req, res) => {
   const { employeeId, currentPin, newPin } = req.body;
 
   // Verify current PIN
@@ -767,6 +774,13 @@ app.post('/api/change-pin', async (req, res) => {
 // Check for conflicting entries
 app.post('/api/check-conflict', async (req, res) => {
   const { employeeId, date } = req.body;
+  const pin = req.headers['x-employee-pin'];
+
+  // Require the employee's PIN — otherwise an unauthenticated caller could probe
+  // whether any employee worked on any date and read their start/end/hours.
+  if (!(await verifyEmployeePin(employeeId, pin))) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
 
   const { data: existing } = await supabaseAdmin
     .from('time_entries')
@@ -839,7 +853,10 @@ app.post('/api/time-entry', async (req, res) => {
     .single();
 
   if (error) {
-    return res.status(400).json({ success: false, message: error.message });
+    // Log full detail server-side; return a generic message so we don't leak
+    // table/column/constraint names from the raw Supabase error to the client.
+    console.error('Failed to insert time entry:', error);
+    return res.status(400).json({ success: false, message: 'Failed to save time entry' });
   }
 
   const timeEntryId = timeEntry.id;
@@ -1649,7 +1666,7 @@ app.delete('/api/admin/employees/:id', async (req, res) => {
 // Get all time entries (admin view)
 app.get('/api/admin/time-entries', async (req, res) => {
   const password = req.headers['x-admin-password'] || req.headers.password;
-  if (password !== ADMIN_PASSWORD) {
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -1852,7 +1869,7 @@ app.get('/api/admin/employees/:id/onboarding', async (req, res) => {
 // Admin: generate a new review token for an existing employee
 app.post('/api/admin/employees/:id/onboarding-token', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) {
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -1874,7 +1891,7 @@ app.post('/api/admin/employees/:id/onboarding-token', async (req, res) => {
 // Admin: send onboarding link via SMS or email
 app.post('/api/admin/employees/:id/send-link', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) {
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
@@ -2297,7 +2314,7 @@ app.post('/api/onboarding/:token', async (req, res) => {
 // List tax filings — optionally filtered by year
 app.get('/api/admin/tax-filings', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { year, employee_id } = req.query;
 
@@ -2325,7 +2342,7 @@ app.get('/api/admin/tax-filings', async (req, res) => {
 // 1099-NEC contractor filings (from filings_1099 table — populated by populate-1099.mjs)
 app.get('/api/admin/filings-1099', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { year } = req.query;
 
@@ -2347,7 +2364,7 @@ app.get('/api/admin/filings-1099', async (req, res) => {
 // Get a single tax filing by id
 app.get('/api/admin/tax-filings/:id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
     .from('tax_filings')
@@ -2362,7 +2379,7 @@ app.get('/api/admin/tax-filings/:id', async (req, res) => {
 // Create a tax filing
 app.post('/api/admin/tax-filings', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const body = req.body;
 
@@ -2426,7 +2443,7 @@ app.post('/api/admin/tax-filings', async (req, res) => {
 // Update a tax filing (e.g., change status to 'filed', update compensation amounts)
 app.put('/api/admin/tax-filings/:id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const body = req.body;
   const updates = { updated_at: new Date().toISOString() };
@@ -2466,7 +2483,7 @@ app.put('/api/admin/tax-filings/:id', async (req, res) => {
 // Delete a tax filing
 app.delete('/api/admin/tax-filings/:id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { error } = await supabaseAdmin.from('tax_filings').delete().eq('id', parseInt(req.params.id));
   if (error) return res.status(400).json({ success: false, message: error.message });
@@ -2477,7 +2494,7 @@ app.delete('/api/admin/tax-filings/:id', async (req, res) => {
 // Matches the 1099-NEC CSV template columns used by LeMed
 app.get('/api/admin/tax-filings/export/:year', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const year = parseInt(req.params.year);
 
@@ -2531,7 +2548,7 @@ app.get('/api/admin/tax-filings/export/:year', async (req, res) => {
 // GET /api/admin/storage/signed-url?path=... — generate a 1-hour signed URL for any storage path
 app.get('/api/admin/storage/signed-url', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { path: filePath } = req.query;
   if (!filePath) return res.status(400).json({ success: false, message: 'path is required' });
@@ -2552,7 +2569,7 @@ app.get('/api/admin/storage/signed-url', async (req, res) => {
 // Bulk compliance check — returns all docs (no signed URLs) for list view
 app.get('/api/admin/employee-documents/all', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
     .from('employee_documents')
@@ -2564,7 +2581,7 @@ app.get('/api/admin/employee-documents/all', async (req, res) => {
 
 app.get('/api/admin/employees/:id/documents', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
     .from('employee_documents')
@@ -2593,7 +2610,7 @@ app.post(
   upload.single('file'),
   async (req, res) => {
     const { password } = req.headers;
-    if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
     const employeeId = parseInt(req.params.id);
     const { document_type, notes, expiration_date, license_number } = req.body;
@@ -2632,7 +2649,7 @@ app.post(
 // PATCH /api/admin/employee-documents/:docId — update expiry/license without re-uploading
 app.patch('/api/admin/employee-documents/:docId', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { expiration_date, license_number, notes } = req.body;
   const updates = {};
@@ -2657,7 +2674,7 @@ app.patch('/api/admin/employee-documents/:docId', async (req, res) => {
 // DELETE /api/admin/employee-documents/:docId — remove a doc
 app.delete('/api/admin/employee-documents/:docId', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   // Fetch path before deleting
   const { data: doc } = await supabaseAdmin
@@ -2685,7 +2702,7 @@ app.delete('/api/admin/employee-documents/:docId', async (req, res) => {
 
 app.get('/api/admin/employees/:id/compliance-items', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
   const { data, error } = await supabaseAdmin
     .from('employee_compliance_items')
     .select('*')
@@ -2696,7 +2713,7 @@ app.get('/api/admin/employees/:id/compliance-items', async (req, res) => {
 
 app.put('/api/admin/employees/:id/compliance-items/:key', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
   const { comment, is_cleared } = req.body;
   const employeeId = parseInt(req.params.id);
   const itemKey = req.params.key;
@@ -2718,7 +2735,7 @@ app.put('/api/admin/employees/:id/compliance-items/:key', async (req, res) => {
 
 app.get('/api/admin/payments', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   let query = supabaseAdmin
     .from('payments')
@@ -2739,7 +2756,7 @@ app.get('/api/admin/payments', async (req, res) => {
 
 app.get('/api/admin/payments/:id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
     .from('payments')
@@ -2753,7 +2770,7 @@ app.get('/api/admin/payments/:id', async (req, res) => {
 
 app.post('/api/admin/payments', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { employee_id, teammate_name, payment_date, amount, payment_method, source, notes } = req.body;
   if (!teammate_name || !payment_date || !amount) {
@@ -2772,7 +2789,7 @@ app.post('/api/admin/payments', async (req, res) => {
 
 app.put('/api/admin/payments/:id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { employee_id, teammate_name, payment_date, amount, payment_method, source, notes } = req.body;
   const updates = {};
@@ -2797,7 +2814,7 @@ app.put('/api/admin/payments/:id', async (req, res) => {
 
 app.delete('/api/admin/payments/:id', async (req, res) => {
   const { password } = req.headers;
-  if (password !== ADMIN_PASSWORD) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { error } = await supabaseAdmin.from('payments').delete().eq('id', parseInt(req.params.id));
   if (error) return res.status(500).json({ success: false, message: error.message });
