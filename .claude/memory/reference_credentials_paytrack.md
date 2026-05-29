@@ -75,6 +75,14 @@ Shared with lm-app and lemedia — same project but separate tables/schemas.
 - **Ask-first:** Rotating the secret (must update cron job commands atomically across all jobs)
 - **Last verified:** 2026-04-13
 
+## Admin Login
+
+- **Env var:** `PAYTRACK_ADMIN_PASSWORD` — gates the paytrack admin UI/API (value in Render env vars + local `.env`, not stored here)
+- **Used by:** Admin authentication middleware on protected paytrack routes
+- **Pre-authorized:** Read from env for local admin access
+- **Ask-first:** Rotating the password (update Render env + notify any admin consumers)
+- **Last verified:** 2026-05-29
+
 ---
 
 ## Related files

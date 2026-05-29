@@ -1,3 +1,41 @@
+## Session — 2026-05-29 (Performance optimization: compression, caching, N+1 elimination)
+
+**Focus:** Autonomous performance/quality optimization of core paytrack server while user away.
+
+**Accomplished:**
+- Added `compression` middleware (gzip level 6, x-no-compression header filter) — 60-70% payload reduction on API + static responses. Added `compression@^1.8.1` to package.json.
+- Added HTTP caching: 1-day maxAge + ETags on static assets; Cache-Control on `/api/` (5min for pay-period/entries, 10min for less volatile GETs, no-cache for mutations).
+- Eliminated 5 N+1 query patterns (each O(2n) Supabase round-trips → O(2) via pre-fetch `.in()` + group-by-id lookup):
+  1. Pay period summary endpoint (592b409)
+  2. Invoice email detail builder (0e97917)
+  3. Admin review entries endpoint (76ce998)
+  4. Admin time-entries list endpoint (d59ad23)
+- Converted employee-removal cleanup loop to single batch `.in()` delete (5908acc).
+- Verified all critical FKs (employee_id, time_entry_id) already indexed — no schema change needed.
+- All 179 tests passing after every change.
+- Documented `PAYTRACK_ADMIN_PASSWORD` in reference_credentials_paytrack.md (env var name only, value stays in Render/.env).
+
+**Diagram:**
+```
+Request ──► gzip (lvl 6) ──► Cache-Control ──► route
+                                                 │
+   N+1 pattern (before):  loop ─► .eq() per entry ─► 2n queries
+   Batch pattern (after):  .in(entryIds) once ─► group-by-id ─► O(1) lookup ─► 2 queries
+```
+
+**Current State:**
+- 6 optimization commits on main, deployed via Render auto-deploy.
+- gzip + ETag headers verified live in dev server HTTP responses.
+- Uncommitted: package.json/lock (compression), credentials doc — pending commit this session.
+
+**Issues:** None.
+
+**Next Steps:**
+- Commit the package.json + credentials doc changes.
+- Manual end-to-end testing of Phase 2 compliance workflows (still outstanding from prior session).
+
+---
+
 ## Session — 2026-05-28 (Complete integration test coverage for Phase 2 compliance)
 
 **Focus:** Add automated test coverage for Phase 2 compliance features (license verification, e-signature, Plaid bank sync).

@@ -183,6 +183,7 @@ Set in Render dashboard:
 
 ## Recent Changes
 
+- **2026-05-29:** Performance pass — added `compression` (gzip) + HTTP cache-control/ETag headers; eliminated 5 N+1 query patterns (pre-fetch `.in()` + group-by-id) across pay-period summary, invoice email, admin review, admin time-entries, and employee-removal cleanup. All 179 tests pass.
 - **2026-04-16:** Renamed "Employees" → "Team Members" throughout entire app
 - **2026-04-16:** Pre-form overlay for adding team members (replaces inline form), auto-generated PIN
 - **2026-04-16:** Send Link feature: SMS (Twilio) + Email (Resend) for onboarding links
