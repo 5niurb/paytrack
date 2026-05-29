@@ -1683,18 +1683,39 @@ app.get('/api/admin/time-entries', async (req, res) => {
     return res.json([]);
   }
 
-  // Transform and get client entries and product sales for each time entry
+  // Batch query all client_entries and product_sales for O(1) lookup
+  const entryIds = (entries || []).map(e => e.id);
+  const { data: allClients } = entryIds.length > 0
+    ? await supabaseAdmin
+        .from('client_entries')
+        .select('id, time_entry_id, client_name, procedure_name, notes, amount_earned, tip_amount, tip_received_cash')
+        .in('time_entry_id', entryIds)
+    : { data: [] };
+
+  const { data: allProductSales } = entryIds.length > 0
+    ? await supabaseAdmin
+        .from('product_sales')
+        .select('id, time_entry_id, product_name, sale_amount, commission_amount, notes')
+        .in('time_entry_id', entryIds)
+    : { data: [] };
+
+  // Group by time_entry_id for O(1) lookup
+  const clientsByEntry = {};
+  const productsByEntry = {};
+  (allClients || []).forEach(c => {
+    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
+    clientsByEntry[c.time_entry_id].push(c);
+  });
+  (allProductSales || []).forEach(p => {
+    if (!productsByEntry[p.time_entry_id]) productsByEntry[p.time_entry_id] = [];
+    productsByEntry[p.time_entry_id].push(p);
+  });
+
+  // Transform entries with O(1) lookups
   const transformedEntries = [];
   for (const entry of (entries || [])) {
-    const { data: clients } = await supabaseAdmin
-      .from('client_entries')
-      .select('id, client_name, procedure_name, notes, amount_earned, tip_amount, tip_received_cash')
-      .eq('time_entry_id', entry.id);
-
-    const { data: productSales } = await supabaseAdmin
-      .from('product_sales')
-      .select('id, product_name, sale_amount, commission_amount, notes')
-      .eq('time_entry_id', entry.id);
+    const clients = clientsByEntry[entry.id] || [];
+    const productSales = productsByEntry[entry.id] || [];
 
     transformedEntries.push({
       id: entry.id,
@@ -1710,8 +1731,8 @@ app.get('/api/admin/time-entries', async (req, res) => {
       hourly_wage: entry.employees?.hourly_wage,
       commission_rate: entry.employees?.commission_rate,
       pay_type: entry.employees?.pay_type,
-      clients: clients || [],
-      productSales: productSales || []
+      clients: clients,
+      productSales: productSales
     });
   }
 
