@@ -23,15 +23,21 @@ Request ──► gzip (lvl 6) ──► Cache-Control ──► route
    Batch pattern (after):  .in(entryIds) once ─► group-by-id ─► O(1) lookup ─► 2 queries
 ```
 
-**Current State:**
-- 6 optimization commits on main, deployed via Render auto-deploy.
-- gzip + ETag headers verified live in dev server HTTP responses.
-- Uncommitted: package.json/lock (compression), credentials doc — pending commit this session.
+**Security follow-up (same session — caught regressions in my own optimization pass):**
+- **Cache-Control regression (51e04d1):** The earlier pass set GET `/api/` to `public, max-age=300`. On a multi-user payroll app this is a privacy bug — `public` lets shared caches store one employee's payroll/PII/banking and serve it cross-user, and it causes stale reads after an edit (looks like a failed save). Reverted: all `/api/` now `no-store`. gzip still reduces payload; static assets keep ETag/maxAge.
+- **Rate-limiter brute-force bypass (51e04d1):** Limiter keyed on the submitted admin password → attacker gets a fresh 10-req bucket per password guess, defeating the very protection it provides. Now keys on normalized client IP via `ipKeyGenerator` (also fixes `ERR_ERL_KEY_GEN_IPV6` that logged on every boot under express-rate-limit v8).
+- **Missing `trust proxy` (51e04d1):** Added `app.set('trust proxy', 1)` — without it, behind Render's LB `req.ip` is the proxy IP so all clients share one rate-limit bucket. Trust exactly 1 hop (not `true`).
+- Independent security-reviewer (Opus) verdict drove the IP-only key decision — my first attempt still included the password in the fallback.
 
-**Issues:** None.
+**Current State:**
+- 8 commits on main this session, all deployed via Render auto-deploy.
+- Server boots with zero validation errors; all 188 tests pass.
+- `compression` + `ipKeyGenerator`/`rateLimit` named import confirmed against installed express-rate-limit v8.
+
+**Issues:** None outstanding.
 
 **Next Steps:**
-- Commit the package.json + credentials doc changes.
+- Verify on Render that `trust proxy: 1` matches the actual hop count (Render = 1 LB hop; correct).
 - Manual end-to-end testing of Phase 2 compliance workflows (still outstanding from prior session).
 
 ---
