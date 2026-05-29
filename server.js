@@ -945,16 +945,44 @@ app.get('/api/pay-period/:employeeId', async (req, res) => {
   let totalCashTips = 0;
   let totalProductCommissions = 0;
 
+  // Batch query: get all client entries and product sales in one call per table (avoid N+1 query pattern)
+  const entryIds = (entries || []).map(e => e.id);
+
+  const { data: allClients } = entryIds.length > 0
+    ? await supabaseAdmin
+        .from('client_entries')
+        .select('time_entry_id, amount_earned, tip_amount, tip_received_cash')
+        .in('time_entry_id', entryIds)
+    : { data: [] };
+
+  const { data: allSales } = entryIds.length > 0
+    ? await supabaseAdmin
+        .from('product_sales')
+        .select('time_entry_id, commission_amount')
+        .in('time_entry_id', entryIds)
+    : { data: [] };
+
+  // Group results by time_entry_id for fast lookup
+  const clientsByEntry = {};
+  const salesByEntry = {};
+
+  (allClients || []).forEach(c => {
+    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
+    clientsByEntry[c.time_entry_id].push(c);
+  });
+
+  (allSales || []).forEach(s => {
+    if (!salesByEntry[s.time_entry_id]) salesByEntry[s.time_entry_id] = [];
+    salesByEntry[s.time_entry_id].push(s);
+  });
+
+  // Process entries with pre-fetched data
   for (const entry of (entries || [])) {
     totalHours += entry.hours;
 
-    // Get client entries
-    const { data: clients } = await supabaseAdmin
-      .from('client_entries')
-      .select('amount_earned, tip_amount, tip_received_cash')
-      .eq('time_entry_id', entry.id);
-
-    for (const c of (clients || [])) {
+    // Process client entries for this entry
+    const clients = clientsByEntry[entry.id] || [];
+    for (const c of clients) {
       totalCommissions += c.amount_earned || 0;
       totalTips += c.tip_amount || 0;
       if (c.tip_received_cash) {
@@ -962,13 +990,9 @@ app.get('/api/pay-period/:employeeId', async (req, res) => {
       }
     }
 
-    // Get product sales
-    const { data: sales } = await supabaseAdmin
-      .from('product_sales')
-      .select('commission_amount')
-      .eq('time_entry_id', entry.id);
-
-    for (const s of (sales || [])) {
+    // Process product sales for this entry
+    const sales = salesByEntry[entry.id] || [];
+    for (const s of sales) {
       totalProductCommissions += s.commission_amount || 0;
     }
   }
