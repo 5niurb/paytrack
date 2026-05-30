@@ -111,17 +111,19 @@ All dates use Los Angeles timezone (`America/Los_Angeles`).
 
 ## Deployment
 
-Render auto-deploys on push to `main`. Manual deploy:
+**Fly.io as of 2026-05-30** (migrated off Render — workspace hit Render's shared 750 free-instance-hours/month cap; the 2 zombie lm-app-api Render services were the main culprit and were deleted). App: `lm-paytrack` (region `sjc`). Sleeps when idle (`min_machines_running = 0`, `auto_stop_machines`) so cost ≈ $0 — paytrack is used a few times per pay period.
+
 ```bash
-git push origin main
-# Wait ~2-3 min for Render to rebuild
+cd paytrack && fly deploy -a lm-paytrack    # token: grep access_token ~/.fly/config.yml; pass -t
 ```
 
-Keep-alive ping runs every 14 minutes to prevent free tier spin-down.
+**Routing:** `paytrack.lemedspa.app` → Cloudflare Worker `paytrack-proxy` (custom-domain bound) → `https://lm-paytrack.fly.dev`. The Worker's `ORIGIN` const (in `lmdev/paytrack-proxy/worker.js`) is the cutover point — change it + redeploy the worker to repoint. NO direct DNS record edits (the host is Worker-managed/read-only in Cloudflare).
+
+**Render:** `LM-PayTrack` service still EXISTS on Render (left in place per Mike 2026-05-30, "leave render alone until we have a reason to tear it down") but is OUT of the traffic path. Don't push-deploy it. Config files (`fly.toml`, `Dockerfile`) live in the paytrack repo.
 
 ## Environment Variables (Production)
 
-Set in Render dashboard:
+Set as Fly secrets on `lm-paytrack` (migrated from Render 2026-05-30; values also still in Render service `srv-d632r5m8alac73cbqubg`):
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `RESEND_API_KEY`

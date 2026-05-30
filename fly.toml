@@ -1,0 +1,28 @@
+# paytrack (LM PayTrack) on Fly.io
+# Migrated from Render 2026-05-30 to escape the shared 750 free-instance-hours cap.
+# Sleeps when idle (min_machines_running = 0) so cost rounds to ~$0 — paytrack is
+# an internal contractor-payroll tool used a few times per pay period.
+app = "lm-paytrack"
+primary_region = "sjc"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"   # scale to zero when idle
+  auto_start_machines = true    # wake on incoming request
+  min_machines_running = 0      # allow full sleep — no always-on cost
+
+  [http_service.http_checks]
+    # No dedicated /health route; the app root returns 200, so check "/".
+    [[http_service.checks]]
+      grace_period = "20s"
+      interval = "30s"
+      method = "GET"
+      timeout = "5s"
+      path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
