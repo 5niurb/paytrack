@@ -1,3 +1,15 @@
+// Sentry must initialize before other instrumentation. Gated on SENTRY_DSN —
+// no-ops gracefully if unset (e.g. local dev), same pattern as lm-mobile.
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'production',
+    tracesSampleRate: 0.1,
+    release: process.env.npm_package_version || '1.0.0',
+  });
+}
+
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
@@ -210,9 +222,40 @@ function setupKeepAlive() {
 }
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/api/health', async (req, res) => {
+  // Lightweight liveness + dependency check. Monitoring uses this to tell
+  // "app process alive" from "page renders" and to catch Supabase-layer outages
+  // (the 502 class of failure) before users do. ?deep=0 skips the DB probe.
+  const health = {
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0',
+  };
+
+  if (req.query.deep !== '0') {
+    try {
+      // Cheap connectivity probe — HEAD-style count, 3s budget so a hung DB
+      // can't hang the health check itself.
+      const probe = supabase.from('employees').select('id', { count: 'exact', head: true });
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('supabase probe timeout')), 3000)
+      );
+      const { error } = await Promise.race([probe, timeout]);
+      health.supabase = error ? 'error' : 'ok';
+      if (error) health.status = 'degraded';
+    } catch (err) {
+      health.supabase = 'error';
+      health.status = 'degraded';
+      health.supabaseError = err.message;
+    }
+  }
+
+  res.status(health.status === 'ok' ? 200 : 503).json(health);
 });
+
+// Bare /health alias (no /api prefix) for platform/uptime checks that hit root paths.
+app.get('/health', (req, res) => res.redirect(307, '/api/health' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '')));
 
 // Invoice table image for MMS — fetched by Twilio when delivering the MMS
 app.get('/api/invoice-media/:invoiceId', async (req, res) => {
@@ -2125,6 +2168,12 @@ app.post(
 );
 
 // Multer error handler (file too large, wrong type)
+// Sentry Express error handler — captures unhandled route errors to Sentry
+// before they reach the custom handlers below. No-op if SENTRY_DSN is unset.
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err.message?.includes('Only PDF')) {
     return res.status(400).json({ success: false, message: err.message });
@@ -2822,6 +2871,20 @@ app.delete('/api/admin/payments/:id', async (req, res) => {
 });
 
 // Start server
+// Global crash handlers — capture to Sentry + log before the process dies, so a
+// stray rejection doesn't take paytrack down silently. uncaughtException exits so
+// Fly restarts a clean process (a corrupted-state process is worse than a restart).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+  if (process.env.SENTRY_DSN) Sentry.captureException(reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+  if (process.env.SENTRY_DSN) Sentry.captureException(err);
+  // Give Sentry a moment to flush, then exit for a clean Fly restart.
+  setTimeout(() => process.exit(1), 1000);
+});
+
 async function start() {
   await initDatabase();
   setupKeepAlive();

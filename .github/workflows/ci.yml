@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check server.js
+        run: node -c server.js
+
+      - name: Run test suite
+        run: npm test
+
+  health-smoke:
+    name: Production health smoke check
+    runs-on: ubuntu-latest
+    # Only after tests pass on main (post-merge confidence check against live app).
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Check live health endpoint
+        run: |
+          # paytrack is always-on on Fly; the deep health check also probes Supabase.
+          code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 20 https://paytrack.lemedspa.app/api/health || echo 000)
+          echo "HTTP $code"; cat /tmp/health.json || true
+          if [ "$code" != "200" ]; then
+            echo "::warning::paytrack health check returned $code (not 200) — investigate"
+          fi
+          # Don't hard-fail the build on a transient health blip; surface as a warning.

@@ -19,13 +19,14 @@ primary_region = "sjc"
   min_machines_running = 1      # one machine always running — no cold starts
 
   [http_service.http_checks]
-    # No dedicated /health route; the app root returns 200, so check "/".
+    # Liveness only (deep=0 skips the Supabase probe) — a DB blip shouldn't make
+    # Fly restart the machine; external uptime monitoring does the deep check.
     [[http_service.checks]]
       grace_period = "20s"
       interval = "30s"
       method = "GET"
       timeout = "5s"
-      path = "/"
+      path = "/api/health?deep=0"
 
 [[vm]]
   size = "shared-cpu-1x"
