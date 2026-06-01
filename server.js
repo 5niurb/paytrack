@@ -234,13 +234,14 @@ app.get('/api/health', async (req, res) => {
   };
 
   if (req.query.deep !== '0') {
+    let timerId;
     try {
       // Cheap connectivity probe — HEAD-style count, 3s budget so a hung DB
       // can't hang the health check itself.
       const probe = supabase.from('employees').select('id', { count: 'exact', head: true });
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('supabase probe timeout')), 3000)
-      );
+      const timeout = new Promise((_, reject) => {
+        timerId = setTimeout(() => reject(new Error('supabase probe timeout')), 3000);
+      });
       const { error } = await Promise.race([probe, timeout]);
       health.supabase = error ? 'error' : 'ok';
       if (error) health.status = 'degraded';
@@ -248,6 +249,10 @@ app.get('/api/health', async (req, res) => {
       health.supabase = 'error';
       health.status = 'degraded';
       health.supabaseError = err.message;
+    } finally {
+      // Clear the timeout timer when the probe wins the race (prevents a slow
+      // accumulation of live timers across health-check pings).
+      clearTimeout(timerId);
     }
   }
 
@@ -2880,9 +2885,14 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err);
-  if (process.env.SENTRY_DSN) Sentry.captureException(err);
-  // Give Sentry a moment to flush, then exit for a clean Fly restart.
-  setTimeout(() => process.exit(1), 1000);
+  if (process.env.SENTRY_DSN) {
+    Sentry.captureException(err);
+    // Actually wait for the event to deliver (flush returns a promise), then
+    // exit for a clean Fly restart. 2s cap so a slow Sentry can't hang the exit.
+    Sentry.flush(2000).finally(() => process.exit(1));
+  } else {
+    process.exit(1);
+  }
 });
 
 async function start() {

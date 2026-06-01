@@ -9,6 +9,10 @@
 # TWILIO_TEST1_PHONE_NUMBER (internal sender), ALERT_PHONE_NUMBER or hardcoded Mike.
 set -u
 
+# Load TWILIO_* + ALERT env. launchd does not source shell rc files, so pull them
+# in explicitly (sync-mac-env writes them into ~/.zshenv).
+[ -f "$HOME/.zshenv" ] && . "$HOME/.zshenv" 2>/dev/null || true
+
 URL="https://paytrack.lemedspa.app/api/health"
 STATE_DIR="${HOME}/.paytrack-uptime"
 FAIL_FILE="${STATE_DIR}/consecutive-failures"
