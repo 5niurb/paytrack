@@ -296,7 +296,8 @@
       wheel.style.cursor = 'grab';
 
       const ITEM_H = 40;
-      let dragging = false, startY = 0, lastApplied = 0, baseTransform = -30 * ITEM_H + ITEM_H;
+      const CENTER_OFFSET = 80;   // center band top = (wheel 200 - item 40) / 2
+      let dragging = false, startY = 0, lastApplied = 0, baseTransform = -30 * ITEM_H + CENTER_OFFSET;
 
       const onDown = (e) => {
         dragging = true;
@@ -410,8 +411,9 @@
         $.dateWheelInner.appendChild(item);
       }
 
-      // Position to show selected in middle
-      $.dateWheelInner.style.transform = `translateY(${-30 * 40 + 40}px)`;
+      // Position to show selected in the center band (row 3 of 5 visible rows).
+      // Selected item is index 30; center row top is at 80px (= (200-40)/2).
+      $.dateWheelInner.style.transform = `translateY(${-30 * 40 + 80}px)`;
 
       updateScrollButtons();
     }
