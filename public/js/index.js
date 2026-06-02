@@ -282,6 +282,75 @@
       selectedDate.setHours(0, 0, 0, 0);
       updateDateDisplay();
       buildDateWheel();
+      enableDateWheelDrag();
+    }
+
+    // Touch/finger (and mouse) drag to scrub the date wheel. Dragging DOWN reveals
+    // earlier dates, UP reveals later dates — one wheel item is 40px tall, so every
+    // 40px of drag = one day. Snaps to the nearest valid (non-future) date on release.
+    function enableDateWheelDrag() {
+      const wheel = document.getElementById('date-wheel');
+      if (!wheel || wheel.dataset.dragBound === '1') return;
+      wheel.dataset.dragBound = '1';
+      wheel.style.touchAction = 'none';      // let us own vertical drags (no page scroll hijack)
+      wheel.style.cursor = 'grab';
+
+      const ITEM_H = 40;
+      let dragging = false, startY = 0, lastApplied = 0, baseTransform = -30 * ITEM_H + ITEM_H;
+
+      const onDown = (e) => {
+        dragging = true;
+        lastApplied = 0;
+        startY = (e.touches ? e.touches[0].clientY : e.clientY);
+        wheel.style.cursor = 'grabbing';
+        // disable the CSS transition during the drag for 1:1 finger tracking
+        $.dateWheelInner.style.transition = 'none';
+        if (e.cancelable) e.preventDefault();
+      };
+      const onMove = (e) => {
+        if (!dragging) return;
+        const y = (e.touches ? e.touches[0].clientY : e.clientY);
+        const dy = y - startY;
+        // live visual follow
+        $.dateWheelInner.style.transform = `translateY(${baseTransform + dy}px)`;
+        // apply day shifts as the finger crosses each item boundary
+        const steps = Math.round(dy / ITEM_H);     // down (+dy) => earlier dates
+        if (steps !== lastApplied) {
+          const delta = steps - lastApplied;
+          lastApplied = steps;
+          // dragging down (positive dy) should go to earlier dates => offset -delta
+          shiftDate(-delta);
+        }
+        if (e.cancelable) e.preventDefault();
+      };
+      const onUp = () => {
+        if (!dragging) return;
+        dragging = false;
+        wheel.style.cursor = 'grab';
+        $.dateWheelInner.style.transition = '';     // restore transition
+        buildDateWheel();                           // re-center / snap
+      };
+
+      wheel.addEventListener('touchstart', onDown, { passive: false });
+      wheel.addEventListener('touchmove', onMove, { passive: false });
+      wheel.addEventListener('touchend', onUp);
+      wheel.addEventListener('touchcancel', onUp);
+      wheel.addEventListener('mousedown', onDown);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    // Shift the selected date by N days, clamped to not go past today (future-blocked),
+    // without rebuilding the wheel mid-drag (buildDateWheel snaps on release).
+    function shiftDate(days) {
+      const today = getLADate();
+      today.setHours(0, 0, 0, 0);
+      const candidate = new Date(selectedDate);
+      candidate.setDate(candidate.getDate() + days);
+      if (candidate <= today) {
+        selectedDate = candidate;
+        updateDateDisplay();
+      }
     }
 
     function updateDateDisplay() {
