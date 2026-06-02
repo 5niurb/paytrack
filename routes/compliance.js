@@ -259,7 +259,7 @@ router.post('/confirm/:token', async (req, res) => {
 // Admin queue — items awaiting review
 // ─────────────────────────────────────────────
 router.get('/review', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -278,7 +278,7 @@ router.get('/review', async (req, res) => {
 // POST /api/compliance/review/:id/approve
 // ─────────────────────────────────────────────
 router.post('/review/:id/approve', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -330,7 +330,7 @@ router.post('/review/:id/approve', async (req, res) => {
 // POST /api/compliance/review/:id/reject
 // ─────────────────────────────────────────────
 router.post('/review/:id/reject', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -404,7 +404,7 @@ router.get('/document/:token', async (req, res) => {
 
 // GET /api/compliance/document-admin/:doc_id — admin view of any document
 router.get('/document-admin/:doc_id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -516,7 +516,7 @@ router.post('/coi-inbound', emailUpload.single('file'), async (req, res) => {
 // Trigger professional license verification via BreEZe
 // ─────────────────────────────────────────────
 router.post('/check-license', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -607,7 +607,7 @@ router.post('/check-license', async (req, res) => {
 // Create e-signature submission for W9 or Contract
 // ─────────────────────────────────────────────
 router.post('/esign-request', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!isAdmin(password)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }

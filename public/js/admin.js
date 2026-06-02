@@ -234,7 +234,7 @@
             const adminPassword = sessionStorage.getItem('adminPasswordValue') || '';
             let payoutsUrl = `/api/admin/payments?start_date=${startDate}&end_date=${endDate}`;
             if (employeeId) payoutsUrl += `&employee_id=${employeeId}`;
-            const payoutsResp = await fetch(payoutsUrl, { headers: { password: adminPassword } });
+            const payoutsResp = await fetch(payoutsUrl, { headers: { 'x-admin-password': adminPassword } });
             const payoutsData = await payoutsResp.json();
             if (Array.isArray(payoutsData)) {
               payoutsData.forEach(p => {
@@ -415,7 +415,7 @@
         const password = sessionStorage.getItem('adminPasswordValue');
         const [empRes, docsRes] = await Promise.all([
           fetch('/api/admin/employees', { headers: { 'x-admin-password': password } }),
-          fetch('/api/admin/employee-documents/all', { headers: { password } }),
+          fetch('/api/admin/employee-documents/all', { headers: { 'x-admin-password': password } }),
         ]);
         const employees = await empRes.json();
         const allDocs = docsRes.ok ? await docsRes.json() : [];
@@ -755,7 +755,7 @@
         const password = sessionStorage.getItem('adminPasswordValue') || '';
         const response = await fetch(`/api/admin/employees/${_sendLinkEmployeeId}/send-link`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', password },
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
           body: JSON.stringify({ type: _sendLinkType }),
         });
 
@@ -820,7 +820,7 @@
       loadEmployeeDocs(id);
       // Load full profile data async and populate PII tabs
       fetch(`/api/admin/employees/${id}/onboarding`, {
-        headers: { password: sessionStorage.getItem('adminPasswordValue') || '' },
+        headers: { 'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '' },
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((resp) => {
@@ -978,7 +978,7 @@
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            password: sessionStorage.getItem('adminPasswordValue') || '',
+            'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '',
           },
           body: JSON.stringify(payload),
         });
@@ -1308,7 +1308,7 @@
       const password = sessionStorage.getItem('adminPasswordValue') || '';
       const res = await fetch(`/api/admin/employees/${employeeId}/compliance-items/${key}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', password },
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
         body: JSON.stringify({ comment, is_cleared: isCleared }),
       });
       if (res.ok) loadEmployeeDocs(employeeId);
@@ -1335,9 +1335,9 @@
       try {
         const password = sessionStorage.getItem('adminPasswordValue') || '';
         const [docsRes, compRes, onbRes] = await Promise.all([
-          fetch(`/api/admin/employees/${employeeId}/documents`, { headers: { password } }),
-          fetch(`/api/admin/employees/${employeeId}/compliance-items`, { headers: { password } }),
-          fetch(`/api/admin/employees/${employeeId}/onboarding`, { headers: { password } }),
+          fetch(`/api/admin/employees/${employeeId}/documents`, { headers: { 'x-admin-password': password } }),
+          fetch(`/api/admin/employees/${employeeId}/compliance-items`, { headers: { 'x-admin-password': password } }),
+          fetch(`/api/admin/employees/${employeeId}/onboarding`, { headers: { 'x-admin-password': password } }),
         ]);
         const docs = await docsRes.json();
         const complianceItems = compRes.ok ? await compRes.json() : [];
@@ -1376,7 +1376,7 @@
       try {
         const res = await fetch(`/api/admin/employees/${employeeId}/documents`, {
           method: 'POST',
-          headers: { password: sessionStorage.getItem('adminPasswordValue') || '' },
+          headers: { 'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '' },
           body: formData,
         });
         const data = await res.json();
@@ -1402,7 +1402,7 @@
       const password = sessionStorage.getItem('adminPasswordValue') || '';
       try {
         const res = await fetch(`/api/admin/storage/signed-url?path=${encodeURIComponent(filePath)}`, {
-          headers: { password },
+          headers: { 'x-admin-password': password },
         });
         const data = await res.json();
         if (data.url) {
@@ -1419,7 +1419,7 @@
       if (!confirm('Remove this document?')) return;
       const res = await fetch(`/api/admin/employee-documents/${docId}`, {
         method: 'DELETE',
-        headers: { password: sessionStorage.getItem('adminPasswordValue') || '' },
+        headers: { 'x-admin-password': sessionStorage.getItem('adminPasswordValue') || '' },
       });
       const data = await res.json();
       if (data.success) {
@@ -1717,7 +1717,7 @@
       try {
         const password = sessionStorage.getItem('adminPasswordValue') || '';
         const response = await fetch(`/api/admin/employees/${employeeId}/onboarding`, {
-          headers: { password }
+          headers: { 'x-admin-password': password }
         });
 
         if (response.status === 404) {
@@ -1875,7 +1875,7 @@
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       try {
-        const res = await fetch(url, { headers: { password }, signal: controller.signal });
+        const res = await fetch(url, { headers: { 'x-admin-password': password }, signal: controller.signal });
         clearTimeout(timeoutId);
         if (!res.ok) {
           const tbody = document.getElementById('payments-table');
@@ -2047,13 +2047,13 @@
         if (editingId) {
           res = await fetch(`/api/admin/payments/${editingId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', password },
+            headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
             body: JSON.stringify(body),
           });
         } else {
           res = await fetch('/api/admin/payments', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', password },
+            headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
             body: JSON.stringify(body),
           });
         }
@@ -2067,7 +2067,7 @@
 
     async function editPayment(id) {
       const password = sessionStorage.getItem('adminPasswordValue');
-      const res = await fetch(`/api/admin/payments/${id}`, { headers: { password } });
+      const res = await fetch(`/api/admin/payments/${id}`, { headers: { 'x-admin-password': password } });
       if (!res.ok) return alert('Could not load payment.');
       const payment = await res.json();
       openPaymentModal(payment);
@@ -2076,7 +2076,7 @@
     async function confirmDeletePayment(id, name) {
       if (!confirm(`Delete payment to ${name}? This cannot be undone.`)) return;
       const password = sessionStorage.getItem('adminPasswordValue');
-      const res = await fetch(`/api/admin/payments/${id}`, { method: 'DELETE', headers: { password } });
+      const res = await fetch(`/api/admin/payments/${id}`, { method: 'DELETE', headers: { 'x-admin-password': password } });
       if (!res.ok) return alert('Delete failed.');
       loadPayments();
     }
@@ -2088,7 +2088,7 @@
       tbody.innerHTML = '<tr><td colspan="9" style="color:#555;text-align:center;padding:20px;">Loading…</td></tr>';
 
       try {
-        const res = await fetch(`/api/admin/filings-1099?year=${year}`, { headers: { password } });
+        const res = await fetch(`/api/admin/filings-1099?year=${year}`, { headers: { 'x-admin-password': password } });
         if (!res.ok) throw new Error('Failed to load tax filings');
         const filings = await res.json();
 
@@ -2172,7 +2172,7 @@
       try {
         const [empRes, docRes] = await Promise.all([
           fetch('/api/admin/employees', { headers: { 'x-admin-password': password } }),
-          fetch('/api/admin/employee-documents/all', { headers: { password } }),
+          fetch('/api/admin/employee-documents/all', { headers: { 'x-admin-password': password } }),
         ]);
         const employees = await empRes.json();
         const allDocs = await docRes.json();
@@ -2306,7 +2306,7 @@
       const password = sessionStorage.getItem('adminPasswordValue');
       let res;
       try {
-        res = await fetch('/api/compliance/review', { headers: { password } });
+        res = await fetch('/api/compliance/review', { headers: { 'x-admin-password': password } });
       } catch {
         return;
       }
@@ -2400,7 +2400,7 @@
       try {
         const res = await fetch(`/api/compliance/review/${id}/approve`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', password },
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
           body: '{}',
         });
         if (res.ok) loadCOIReview();
@@ -2416,7 +2416,7 @@
       try {
         const res = await fetch(`/api/compliance/review/${id}/reject`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', password },
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
           body: '{}',
         });
         if (res.ok) loadCOIReview();
@@ -2439,7 +2439,7 @@
         ...options,
         headers: {
           ...(options.headers || {}),
-          password: getAdminPassword(),
+          'x-admin-password': getAdminPassword(),
         },
       });
     }

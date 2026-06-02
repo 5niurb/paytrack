@@ -14,7 +14,7 @@ function init(supabaseClient, adminPwd, verifyFn) {
 }
 
 function authCheck(req, res) {
-  const password = req.headers['x-admin-password'] || req.headers.password;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword || !verifyAdminPassword(password, adminPassword)) {
     res.status(401).json({ success: false, message: 'Unauthorized' });
     return false;

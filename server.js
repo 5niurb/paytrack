@@ -235,7 +235,7 @@ app.get('/api/invoice-media/:invoiceId', async (req, res) => {
   // Require admin authentication before exposing employee PII and financial data.
   // Uses the timing-safe helper; references process.env.ADMIN_PASSWORD directly
   // because the ADMIN_PASSWORD const is declared later in the file (after this route).
-  const password = req.headers['x-admin-password'] || req.headers.password;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, process.env.ADMIN_PASSWORD)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -1681,7 +1681,7 @@ app.delete('/api/admin/employees/:id', async (req, res) => {
 
 // Get all time entries (admin view)
 app.get('/api/admin/time-entries', async (req, res) => {
-  const password = req.headers['x-admin-password'] || req.headers.password;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -1884,7 +1884,7 @@ app.get('/api/admin/employees/:id/onboarding', async (req, res) => {
 
 // Admin: generate a new review token for an existing employee
 app.post('/api/admin/employees/:id/onboarding-token', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -1906,7 +1906,7 @@ app.post('/api/admin/employees/:id/onboarding-token', async (req, res) => {
 
 // Admin: send onboarding link via SMS or email
 app.post('/api/admin/employees/:id/send-link', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -2335,7 +2335,7 @@ app.post('/api/onboarding/:token', async (req, res) => {
 
 // List tax filings — optionally filtered by year
 app.get('/api/admin/tax-filings', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { year, employee_id } = req.query;
@@ -2363,7 +2363,7 @@ app.get('/api/admin/tax-filings', async (req, res) => {
 
 // 1099-NEC contractor filings (from filings_1099 table — populated by populate-1099.mjs)
 app.get('/api/admin/filings-1099', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { year } = req.query;
@@ -2385,7 +2385,7 @@ app.get('/api/admin/filings-1099', async (req, res) => {
 
 // Get a single tax filing by id
 app.get('/api/admin/tax-filings/:id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
@@ -2400,7 +2400,7 @@ app.get('/api/admin/tax-filings/:id', async (req, res) => {
 
 // Create a tax filing
 app.post('/api/admin/tax-filings', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const body = req.body;
@@ -2464,7 +2464,7 @@ app.post('/api/admin/tax-filings', async (req, res) => {
 
 // Update a tax filing (e.g., change status to 'filed', update compensation amounts)
 app.put('/api/admin/tax-filings/:id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const body = req.body;
@@ -2504,7 +2504,7 @@ app.put('/api/admin/tax-filings/:id', async (req, res) => {
 
 // Delete a tax filing
 app.delete('/api/admin/tax-filings/:id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { error } = await supabaseAdmin.from('tax_filings').delete().eq('id', parseInt(req.params.id));
@@ -2515,7 +2515,7 @@ app.delete('/api/admin/tax-filings/:id', async (req, res) => {
 // Export tax filings for a year as Avalara/Track1099-compatible CSV
 // Matches the 1099-NEC CSV template columns used by LeMed
 app.get('/api/admin/tax-filings/export/:year', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const year = parseInt(req.params.year);
@@ -2569,7 +2569,7 @@ app.get('/api/admin/tax-filings/export/:year', async (req, res) => {
 
 // GET /api/admin/storage/signed-url?path=... — generate a 1-hour signed URL for any storage path
 app.get('/api/admin/storage/signed-url', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { path: filePath } = req.query;
@@ -2590,7 +2590,7 @@ app.get('/api/admin/storage/signed-url', async (req, res) => {
 // GET /api/admin/employees/:id/documents — list docs with signed download URLs
 // Bulk compliance check — returns all docs (no signed URLs) for list view
 app.get('/api/admin/employee-documents/all', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
@@ -2602,7 +2602,7 @@ app.get('/api/admin/employee-documents/all', async (req, res) => {
 });
 
 app.get('/api/admin/employees/:id/documents', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
@@ -2631,7 +2631,7 @@ app.post(
   '/api/admin/employees/:id/documents',
   upload.single('file'),
   async (req, res) => {
-    const { password } = req.headers;
+    const password = req.headers['x-admin-password'];
     if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
     const employeeId = parseInt(req.params.id);
@@ -2670,7 +2670,7 @@ app.post(
 
 // PATCH /api/admin/employee-documents/:docId — update expiry/license without re-uploading
 app.patch('/api/admin/employee-documents/:docId', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { expiration_date, license_number, notes } = req.body;
@@ -2695,7 +2695,7 @@ app.patch('/api/admin/employee-documents/:docId', async (req, res) => {
 
 // DELETE /api/admin/employee-documents/:docId — remove a doc
 app.delete('/api/admin/employee-documents/:docId', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   // Fetch path before deleting
@@ -2723,7 +2723,7 @@ app.delete('/api/admin/employee-documents/:docId', async (req, res) => {
 // ============ Compliance Items API ============
 
 app.get('/api/admin/employees/:id/compliance-items', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
   const { data, error } = await supabaseAdmin
     .from('employee_compliance_items')
@@ -2734,7 +2734,7 @@ app.get('/api/admin/employees/:id/compliance-items', async (req, res) => {
 });
 
 app.put('/api/admin/employees/:id/compliance-items/:key', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
   const { comment, is_cleared } = req.body;
   const employeeId = parseInt(req.params.id);
@@ -2756,7 +2756,7 @@ app.put('/api/admin/employees/:id/compliance-items/:key', async (req, res) => {
 // ============ Payments API ============
 
 app.get('/api/admin/payments', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   let query = supabaseAdmin
@@ -2777,7 +2777,7 @@ app.get('/api/admin/payments', async (req, res) => {
 });
 
 app.get('/api/admin/payments/:id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { data, error } = await supabaseAdmin
@@ -2791,7 +2791,7 @@ app.get('/api/admin/payments/:id', async (req, res) => {
 });
 
 app.post('/api/admin/payments', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { employee_id, teammate_name, payment_date, amount, payment_method, source, notes } = req.body;
@@ -2810,7 +2810,7 @@ app.post('/api/admin/payments', async (req, res) => {
 });
 
 app.put('/api/admin/payments/:id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { employee_id, teammate_name, payment_date, amount, payment_method, source, notes } = req.body;
@@ -2835,7 +2835,7 @@ app.put('/api/admin/payments/:id', async (req, res) => {
 });
 
 app.delete('/api/admin/payments/:id', async (req, res) => {
-  const { password } = req.headers;
+  const password = req.headers['x-admin-password'];
   if (!verifyAdminPassword(password, ADMIN_PASSWORD)) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   const { error } = await supabaseAdmin.from('payments').delete().eq('id', parseInt(req.params.id));
