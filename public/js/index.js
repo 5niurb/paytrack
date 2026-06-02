@@ -461,7 +461,28 @@
     }
 
     // Time Calculation
+    // Snap a "HH:MM" time string to the nearest 5-minute increment. The native
+    // <input type="time"> picker ignores the `step` attribute in its wheel UI
+    // (step only gates form validation), so users can scroll to any minute.
+    // We enforce 5-min granularity here, where every change runs through.
+    function snapTimeToFive(value) {
+      if (!value) return value;
+      const [h, m] = value.split(':').map(Number);
+      if (Number.isNaN(h) || Number.isNaN(m)) return value;
+      let total = h * 60 + Math.round(m / 5) * 5;
+      total = ((total % 1440) + 1440) % 1440; // wrap within a day
+      const hh = String(Math.floor(total / 60)).padStart(2, '0');
+      const mm = String(total % 60).padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+
     function calculateHours() {
+      // Enforce 5-minute increments on the time inputs (native picker allows any minute).
+      const snappedStart = snapTimeToFive($.startTime.value);
+      if (snappedStart !== $.startTime.value) $.startTime.value = snappedStart;
+      const snappedEnd = snapTimeToFive($.endTime.value);
+      if (snappedEnd !== $.endTime.value) $.endTime.value = snappedEnd;
+
       const startTime = $.startTime.value;
       const endTime = $.endTime.value;
       const breakMinutes = parseInt($.breakMinutes.value) || 0;

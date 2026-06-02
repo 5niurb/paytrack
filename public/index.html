@@ -81,7 +81,25 @@
             </div>
             <div class="form-group">
               <label>Break Time (minutes)</label>
-              <input type="number" id="break-minutes" value="0" min="0" step="5" onchange="calculateHours()">
+              <select id="break-minutes" onchange="calculateHours()">
+                <option value="0">0</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="25">25</option>
+                <option value="30">30</option>
+                <option value="35">35</option>
+                <option value="40">40</option>
+                <option value="45">45</option>
+                <option value="50">50</option>
+                <option value="55">55</option>
+                <option value="60">60</option>
+                <option value="75">75</option>
+                <option value="90">90</option>
+                <option value="105">105</option>
+                <option value="120">120</option>
+              </select>
             </div>
           </div>
 
