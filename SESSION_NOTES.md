@@ -1132,3 +1132,43 @@ Admin creates employee
 2. Verify: create a test employee → copy onboarding link → fill form → verify DB row + admin "View Details"
 3. (Future) Wire pgsodium for `tin_encrypted`, `bank_routing_encrypted`, `bank_account_encrypted`
 4. (Future) Add email notification to worker when form is received (optional, not requested)
+
+---
+
+## Session — 2026-06-02
+**Focus:** Daily-entry UI polish — date wheel, time/break pickers, and a Cloudflare edge-cache bug that was silently serving stale assets.
+
+**Accomplished:**
+- **Finger-draggable date wheel** (`public/js/index.js`): added touch+mouse drag to scrub the date wheel (`enableDateWheelDrag()`, `shiftDate()`). Drag down = earlier dates, up = later; 40px/day; snaps via `buildDateWheel()` on release; clamped to not go past today.
+- **Native-iOS look for the date wheel** (`public/css/index.css` + `index.html`): 5 visible rows (was 3), persistent highlighted center selection band (`.date-wheel-band`, top:80px), visible/fading neighbors, rounded corners. Center offset moved 40px→80px; JS `buildDateWheel` transform (`-30*40+80`) and drag `CENTER_OFFSET=80` updated to match. Trimmed card/date-display/calculated-hours padding+fonts so the whole form fits one screen.
+- **5-minute time enforcement** (`public/js/index.js`): `step="300"` on `<input type="time">` is IGNORED by the native picker wheel (it only gates form validation), so users could pick any minute. Added `snapTimeToFive()` called inside `calculateHours()` (runs on every change AND the submit path at line ~721) — rewrites start/end to nearest 5 min. Unit-tested 9 cases incl. midnight wrap.
+- **Break-time picker** (`index.html`): replaced free `<input type="number">` with a `<select>` of 5-min options (0–60 by 5, then 75/90/105/120). `.value` API identical so submit/reset paths unchanged. Label is "Break Time (minutes)".
+- **🔑 Root-cause fix — CF Worker edge cache** (`paytrack-proxy/worker.js` in lmdev repo): the Worker did a plain `fetch(origin)` which honored the origin's `cache-control: max-age=86400`, so EVERY paytrack deploy served STALE css/js at the edge for up to 24h (this is why earlier label/CSS changes "didn't show"). Added `cf: { cacheTtl: 0 }` to the subrequest → deploys now instantly live. Added `paytrack-proxy/wrangler.toml` for reproducible deploys. Purged the zone cache.
+
+**Diagram:**
+```
+edit css/js  ──> fly deploy lm-paytrack ──> origin fresh
+                                              │
+   BEFORE: Worker fetch() cached 24h ─────────┘  (stale at edge!)
+   AFTER:  Worker fetch(cf:{cacheTtl:0}) ─────┘  (always fresh)
+                                              │
+                          paytrack.lemedspa.app (browser refresh busts browser cache)
+```
+
+**Current State:**
+- All deployed to Fly (`lm-paytrack`) + verified healthy (`/api/health` 200, supabase:ok) via origin AND proxy.
+- paytrack repo: commits `6fdbaab` (drag+5min), `ff04b4a` (break label), `0c69bc8` (iOS wheel+compact), `894b6e2` (5-min snap + break select) — all pushed.
+- lmdev repo: commit `3234778` (worker cacheTtl:0 + wrangler.toml) — pushed.
+- Worker deployed via CF API (Global key; scoped CLOUDFLARE_API_TOKEN lacks /memberships perm so `npx wrangler deploy` fails — use the API multipart PUT instead).
+
+**Issues:**
+- None outstanding. User confirmed working ("great").
+
+**Next Steps:**
+- (Optional polish) Tune date-wheel drag snap/feel if it feels off on-device.
+- Carryover from prior sessions (unrelated to this one): Ashley PIN root-cause; lm-app Sentry fix on main (deploy vs revert decision); tighten Sentry triage directive so patient-facing→PR-only; enable `com.lemed.sentry-triage` poller; task-watcher restart for DISCORD_WEBHOOK_ALERTS.
+
+**Deploy/verify cheatsheet (this app):**
+- Deploy: `cd paytrack && TOKEN=$(grep access_token ~/.fly/config.yml | sed 's/access_token: *//' | tr -d '"') && fly deploy -a lm-paytrack -t "$TOKEN"`
+- Verify served-fresh: node https GET `paytrack.lemedspa.app/{css/index.css,js/index.js,/}` and grep for the change (curl is blocked by context-mode — use node `https.get`).
+- Worker redeploy: CF API multipart PUT to `/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/paytrack-proxy` with X-Auth-Email/X-Auth-Key (Global key).
