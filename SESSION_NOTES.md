@@ -1,3 +1,26 @@
+## Session — 2026-06-02/07 (Admin auth header standardization — deployed)
+
+**Focus:** Close out audit finding #7 (deferred from the 2026-05-29 security pass): standardize all admin auth on a single header and drop the legacy fallback.
+
+**Accomplished:**
+- **Standardized on `x-admin-password`** (`00d4d1f`): converted all 24 frontend admin `fetch` calls in `public/js/admin.js` from the `password` header to `x-admin-password` (login POST *body* unchanged — that's `/api/admin/verify` reading `req.body.password`). Backend (`server.js` ×24 routes, `routes/compliance.js` ×6, `routes/plaid.js`) now read `req.headers['x-admin-password']` only — removed the `|| req.headers.password` fallback on the 3 sites that had it. CORS allowlist already only exposed `x-admin-password`, so this aligns code with what CORS permitted.
+- **Deployed to Fly** (`lm-paytrack`) and **verified live** through the CF Worker proxy:
+  - `health` → 200; admin route w/ correct `x-admin-password` → 200; admin route w/ legacy `password` header → **401** (fallback gone); wrong `x-admin-password` → 401.
+- All 194 tests pass.
+
+**Diagram:**
+```
+frontend admin.js  ──(x-admin-password)──►  server.js / compliance.js / plaid.js
+  login form ──(body {password})──► /api/admin/verify   (unchanged)
+  legacy `password` HEADER ──► now 401 (fallback removed)
+```
+
+**Current State:** Live on Fly; admin panel unaffected (it sends x-admin-password). Earlier 2026-06-02 UI work (date-wheel drag, 5-min time/break pickers, CF edge-cache `cacheTtl:0` fix) shipped in commits `6fdbaab`/`894b6e2`/`45d631d` — see git history.
+
+**Issues:** None. **Next steps:** None.
+
+---
+
 ## Session — 2026-05-29 (Performance optimization: compression, caching, N+1 elimination)
 
 **Focus:** Autonomous performance/quality optimization of core paytrack server while user away.
