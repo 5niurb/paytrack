@@ -1,3 +1,18 @@
+## Session — 2026-06-11 — Fix admin rate limiter breaking bank transaction assign
+
+**Focus:** Diagnose and fix JSON parse error when assigning Chase bank transactions to workers.
+
+**Accomplished:**
+- **Root cause:** `adminLimiter` rate limit was 10 req/15min across ALL admin + plaid routes. Loading admin page + fetching data + first assign exhausted the budget. Second assign got HTTP 429 with plain text "Too many admin requests" → `resp.json()` crashed with "Unexpected token 'T'".
+- **Fix 1:** Bumped rate limit from 10 → 100 req/15min (still prevents brute-force, allows normal admin usage)
+- **Fix 2:** Rate limit `message` changed from plain string to JSON object `{ success: false, message: '...' }`
+- **Fix 3:** Hardened `adminFetch()` globally — now checks `resp.ok` before returning, throws with actual error message on non-2xx responses. All admin API callers (assign, discard, sync, etc.) benefit.
+- Deployed to Fly.io (`lm-paytrack`), health verified.
+
+**Current State:**
+- Admin bank transaction assign working correctly
+- All admin API error paths now show meaningful messages instead of JSON parse errors
+
 ## Session — 2026-06-02/07 (Admin auth header standardization — deployed)
 
 **Focus:** Close out audit finding #7 (deferred from the 2026-05-29 security pass): standardize all admin auth on a single header and drop the legacy fallback.
