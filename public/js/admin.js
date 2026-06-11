@@ -2434,14 +2434,21 @@
       return sessionStorage.getItem('adminPasswordValue') || '';
     }
 
-    function adminFetch(url, options = {}) {
-      return fetch(url, {
+    async function adminFetch(url, options = {}) {
+      const resp = await fetch(url, {
         ...options,
         headers: {
           ...(options.headers || {}),
           'x-admin-password': getAdminPassword(),
         },
       });
+      if (!resp.ok) {
+        const text = await resp.text();
+        let msg;
+        try { msg = JSON.parse(text).message || text; } catch { msg = text; }
+        throw new Error(msg);
+      }
+      return resp;
     }
 
     function buildPlaidHandler(linkToken, receivedRedirectUri) {
@@ -2649,10 +2656,6 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ employeeId: empId, comments }),
         });
-        if (!resp.ok) {
-          const text = await resp.text();
-          try { const j = JSON.parse(text); throw new Error(j.message || text); } catch (_) { throw new Error(text); }
-        }
         const data = await resp.json();
         if (!data.success) throw new Error(data.message);
         loadPlaidPending();
