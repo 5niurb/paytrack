@@ -2649,6 +2649,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ employeeId: empId, comments }),
         });
+        if (!resp.ok) {
+          const text = await resp.text();
+          try { const j = JSON.parse(text); throw new Error(j.message || text); } catch (_) { throw new Error(text); }
+        }
         const data = await resp.json();
         if (!data.success) throw new Error(data.message);
         loadPlaidPending();

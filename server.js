@@ -119,7 +119,7 @@ app.use('/api/', (req, res, next) => {
 // Rate limiting for admin routes to prevent brute-force password attacks
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 attempts per window
+  max: 100, // 100 requests per window (admin pages make many API calls)
   // Rate-limit by normalized client IP. We deliberately do NOT key on the
   // submitted admin password — doing so would give an attacker a fresh bucket
   // per password guess, defeating the brute-force protection this limiter
@@ -131,7 +131,7 @@ const adminLimiter = rateLimit({
       && !req.path.startsWith('/api/compliance')
       && !req.path.startsWith('/api/plaid');
   },
-  message: 'Too many admin requests, please try again later',
+  message: { success: false, message: 'Too many admin requests, please try again later' },
 });
 app.use(adminLimiter);
 
