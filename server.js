@@ -1631,15 +1631,15 @@ app.put('/api/admin/employees/:id/pii', async (req, res) => {
     if (req.body[key] !== undefined) payload[key] = req.body[key];
   }
   if (req.body.tin_raw) {
-    payload.tin_encrypted = encryptValue(req.body.tin_raw);
+    payload.tin_encrypted = await encryptValue(req.body.tin_raw);
     payload.tin_last4 = req.body.tin_raw.replace(/\D/g, '').slice(-4);
   }
   if (req.body.bank_routing_raw) {
-    payload.bank_routing_encrypted = encryptValue(req.body.bank_routing_raw);
+    payload.bank_routing_encrypted = await encryptValue(req.body.bank_routing_raw);
     payload.bank_routing_last4 = req.body.bank_routing_raw.replace(/\D/g, '').slice(-4);
   }
   if (req.body.bank_account_raw) {
-    payload.bank_account_encrypted = encryptValue(req.body.bank_account_raw);
+    payload.bank_account_encrypted = await encryptValue(req.body.bank_account_raw);
     payload.bank_account_last4 = req.body.bank_account_raw.replace(/\D/g, '').slice(-4);
   }
   if (Object.keys(payload).length === 0) {

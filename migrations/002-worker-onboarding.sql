@@ -24,11 +24,10 @@ CREATE INDEX IF NOT EXISTS idx_employees_onboarding_token ON employees(onboardin
 -- PART 2: employee_onboarding table
 -- Stores the full IC onboarding packet submitted by the worker.
 -- Sensitive fields (SSN, bank routing/account) are stored as
--- last-4 masks only in plain columns; the *_encrypted columns
--- currently hold the raw value as plaintext with a clear TODO
--- to wire pgsodium encryption tomorrow.
--- TODO(security): encrypt *_encrypted columns via
---   pgsodium.crypto_aead_det_encrypt() with a tenant key
+-- last-4 masks in plain columns; the *_encrypted columns hold
+-- AES-256-GCM ciphertext produced at the application layer
+-- (lib/crypto.js, key = PAYTRACK_ENCRYPTION_KEY). All read/write
+-- paths in server.js encrypt via encryptValue() before insert.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS employee_onboarding (
@@ -52,10 +51,9 @@ CREATE TABLE IF NOT EXISTS employee_onboarding (
   address_zip TEXT,
 
   -- Tax / W-9
-  -- TODO(security): replace tin_encrypted with pgsodium.crypto_aead_det_encrypt()
   tin_last4 TEXT,           -- last 4 digits of SSN/EIN — always stored
   tin_type TEXT,            -- 'SSN' or 'EIN'
-  tin_encrypted TEXT,       -- plaintext SSN/EIN for now; encrypt tomorrow
+  tin_encrypted TEXT,       -- AES-256-GCM ciphertext (lib/crypto.js)
   w9_entity_name TEXT,
   w9_tax_classification TEXT,
   w9_exempt_payee_code TEXT,
@@ -76,15 +74,13 @@ CREATE TABLE IF NOT EXISTS employee_onboarding (
   prof_liability_aggregate DECIMAL(12,2),
 
   -- Banking
-  -- TODO(security): replace bank_routing_encrypted and bank_account_encrypted
-  --   with pgsodium.crypto_aead_det_encrypt()
   bank_name TEXT,
   bank_account_owner_name TEXT,
   bank_account_type TEXT,    -- 'checking' or 'savings'
   bank_routing_last4 TEXT,   -- last 4 of routing — always stored
   bank_account_last4 TEXT,   -- last 4 of account — always stored
-  bank_routing_encrypted TEXT,  -- plaintext routing for now; encrypt tomorrow
-  bank_account_encrypted TEXT,  -- plaintext account for now; encrypt tomorrow
+  bank_routing_encrypted TEXT,  -- AES-256-GCM ciphertext (lib/crypto.js)
+  bank_account_encrypted TEXT,  -- AES-256-GCM ciphertext (lib/crypto.js)
   payment_method TEXT,          -- 'direct_deposit' or 'zelle' or 'check'
   zelle_contact TEXT,
 
