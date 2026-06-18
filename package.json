@@ -7,7 +7,7 @@
     "prebuild": "node scripts/cleanup-build-artifacts.js",
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node test/validation.test.js && node test/crypto.test.js && node test/compliance-routes.test.js && node test/plaid-sync.test.js && node test/compliance-tokens.test.js && node test/integration-mocks.test.js && node test/health.test.js"
+    "test": "node test/run-all.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

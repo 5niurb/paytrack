@@ -32,7 +32,7 @@ Employee time & payroll tracking PWA for Le Med Spa staff.
 - **App name:** LM PayTrack
 - **Repo:** github.com/5niurb/paytrack
 - **Tech:** Node.js, Express, Supabase (PostgreSQL), vanilla JS frontend
-- **Deployment:** Render.com (auto-deploys on push to main)
+- **Deployment:** Fly.io (app `lm-paytrack`, region `sjc`) as of 2026-05-30 — see the Deployment section below. (Migrated off Render; the Render service still exists but is out of the traffic path.)
 - **Production URL:** https://paytrack.lemedspa.app
 
 ## Running Locally

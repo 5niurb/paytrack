@@ -1162,7 +1162,7 @@ Admin creates employee
 **Issues / Remaining:**
 
 - **Migration not yet applied to Supabase production** — must paste `migrations/002-worker-onboarding.sql` into Supabase SQL Editor before the feature works in production
-- pgsodium encryption deferred — `*_encrypted` columns store plaintext with `TODO(security)` comments; `*_last4` columns always populated correctly
+- Sensitive fields encrypted at the app layer via AES-256-GCM (`lib/crypto.js`, key `PAYTRACK_ENCRYPTION_KEY`) — `*_encrypted` columns hold ciphertext, `*_last4` columns hold the masks. (The original pgsodium plan was dropped in favor of app-layer crypto; the `TODO(security)` comments in `migrations/002` were updated to match.)
 
 **Next Steps:**
 
