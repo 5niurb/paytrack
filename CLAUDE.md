@@ -31,15 +31,19 @@
 Employee time & payroll tracking PWA for Le Med Spa staff.
 - **App name:** LM PayTrack
 - **Repo:** github.com/5niurb/paytrack
-- **Tech:** Node.js, Express, Supabase (PostgreSQL), vanilla JS frontend
+- **Tech:** Node.js (v22), Express, Supabase (PostgreSQL), vanilla JS frontend (no build step, no framework)
 - **Deployment:** Fly.io (app `lm-paytrack`, region `sjc`) as of 2026-05-30 — see the Deployment section below. (Migrated off Render; the Render service still exists but is out of the traffic path.)
 - **Production URL:** https://paytrack.lemedspa.app
 
 ## Running Locally
 
 ```bash
-npm run dev    # Starts server on port 3000 with --watch
+npm run dev    # = `node server.js` — no watcher; restart manually after edits
+npm start      # same thing (production entrypoint)
+npm test       # runs the full suite via test/run-all.mjs (see Testing)
 ```
+
+Server listens on `process.env.PORT || 3000` locally (Fly injects `PORT=8080` in prod).
 
 Requires `.env` file with:
 - `SUPABASE_URL`
@@ -48,14 +52,40 @@ Requires `.env` file with:
 - `RESEND_API_KEY` (optional — for invoice emails)
 - `ADMIN_PASSWORD` (optional — defaults to hardcoded value)
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` (optional — for onboarding SMS links)
+- `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (optional — for bank sync)
+- `SENTRY_DSN` (optional — error tracking; no-ops if unset)
+- `SUPABASE_SERVICE_ROLE_KEY` (for storage/file uploads)
 
-## Key Files
+## Key Files & Layout
 
-- `server.js` — Express API (all routes, Supabase client, pay period logic)
-- `public/index.html` — Employee app (PIN login, time entry, pay review, invoice)
-- `public/admin.html` — Admin panel (review entries, employees, reports)
-- `supabase-schema.sql` — Database schema (paste into Supabase SQL Editor)
-- `render.yaml` — Render deployment config
+Server (Express + Supabase, no ORM):
+- `server.js` — main Express app: middleware, most API routes, Supabase client, startup guards (~2900 lines; the large one to grep)
+- `lib/` — pure, unit-tested helpers extracted from `server.js`:
+  - `pay-periods.js` — 26-period-per-year date logic (LA timezone)
+  - `crypto.js` — AES-256-GCM encrypt/decrypt for onboarding PII
+  - `health.js` — health-report builder (liveness vs deep DB probe)
+  - `onboarding-validation.js` — server-side onboarding form validation (also shared with tests)
+  - `compliance-tokens.js`, `compliance-scan.mjs`, `compliance-notifications.mjs` — compliance job pieces
+  - `debug.js` — DEBUG-gated logging
+- `routes/` — modular route sub-apps mounted in `server.js`:
+  - `compliance.js` → `/api/compliance` (init'd via `initCompliance`)
+  - `plaid.js` → `/api/admin/plaid` (init'd via `initPlaid`)
+- `server/` — Plaid + external clients: `plaid-client.js`, `plaid-sync.js`, `render-api.js`
+
+Frontend (`public/`, served statically, no bundler):
+- `index.html` + `js/index.js` + `css/index.css` — Employee app (PIN login, time entry, pay review, invoice)
+- `admin.html` + `js/admin.js` + `css/admin.css` — Admin panel (large — most admin logic lives in `js/admin.js`)
+- `onboarding.html` — self-onboarding flow
+- `review.html` — pay review / invoice review page
+- `compliance.html` — compliance scanner dashboard
+- `sw.js`, `manifest.json`, `icon*.{svg,png}` — PWA shell
+
+Data & config:
+- `supabase-schema.sql` — base database schema (paste into Supabase SQL Editor)
+- `migrations/` — numbered incremental migrations (`002`–`010`); apply in order
+- `fly.toml`, `Dockerfile` — Fly.io deployment
+- `render.yaml` — legacy Render config (out of traffic path; kept for reference)
+- `test/` — Node test suites; `.github/workflows/ci.yml` — CI
 
 ## Database
 
@@ -65,10 +95,11 @@ All data lives in Supabase PostgreSQL. Tables:
 - `client_entries` — patient services (linked to time_entry)
 - `product_sales` — product commissions (linked to time_entry)
 - `invoices` — submitted pay period invoices
-- `worker_onboarding` (002–004) — self-onboarding flow with AES-256-GCM encrypted TIN/banking
+- `employee_onboarding` (002–004) — self-onboarding flow with AES-256-GCM encrypted TIN/banking
+- `employee_documents`, `compliance_documents`, `compliance_requests` (007/008) — compliance scanner output & COI/license tracking
 - `tax_filings` (005) — 1099 prep + filing tracking
-- `compliance_*` (007) — compliance scanner output (background job nightly)
-- `plaid_*` (009/010) — bank-sync via Plaid (production, read-only against user accounts)
+- `plaid_pending` / `plaid_*` (009/010) — bank-sync via Plaid (production, read-only against user accounts)
+- `app_settings` — key/value app config
 
 Schema is layered: `supabase-schema.sql` is the base; subsequent changes live as numbered files in `migrations/` (currently `002-worker-onboarding.sql` through `010_plaid_fixes.sql`). Apply in numeric order via Supabase SQL Editor or the `/migrate` skill.
 
@@ -101,17 +132,40 @@ All dates use Los Angeles timezone (`America/Los_Angeles`).
 ### Compliance (`/compliance`)
 - Compliance scanner dashboard (license expirations, insurance COI, tax docs)
 - Background job: `com.lemed.compliance-scanner` (daily 11pm — see workspace CLAUDE.md)
+- Contractor-facing email/SMS is **gated OFF** by `COMPLIANCE_CONTACT_ENABLED` (kill-switch) until Mike says go-live
+
+### Bank Sync (Plaid) — admin only
+- `routes/plaid.js` (`/api/admin/plaid`) + `server/plaid-client.js`, `server/plaid-sync.js`
+- Read-only against the user's own Chase account; admin assigns synced transactions to workers/payments
+- Tables: `plaid_*` (migrations `009`/`010`)
+
+### Tax Filings & Payments (admin)
+- 1099 prep + filing tracking (`tax_filings`, migration `005`), CSV export by year
+- Manual payment records assignable to workers (`/api/admin/payments`)
 
 ## Conventions
 
-- No frameworks — plain Express + vanilla JS
+- No frameworks, no build step — plain Express + vanilla JS (frontend served straight from `public/`)
 - Direct Supabase client calls (no ORM)
 - LA timezone for all date logic
 - Pay period navigation uses offset from current period (0 = current, -1 = previous, etc.)
+- **Admin auth:** every admin/plaid/compliance route reads the `x-admin-password` request header (standardized 2026-06 — the legacy `password` header fallback was removed). The login POST body to `/api/admin/verify` still uses `{ password }`. Password compare is timing-safe (`crypto.timingSafeEqual`).
+- **Middleware order in `server.js`:** `compression` → CORS allowlist (`paytrack.lemedspa.app`, `lemedspa.app`, `api.lemedspa.app`, localhost) → `express.json` → static (`maxAge 1d` + ETag) → `no-store` on all `/api/` responses (payroll/PII must never be cached).
+- **Rate limiting:** `express-rate-limit` on admin routes (100 req/15min) and PIN routes; `trust proxy` is set to `1` (single reverse proxy). Rate-limit responses return JSON, not plain text (a plain-string 429 once broke a client `resp.json()`).
+- **Extract → test:** pull pure logic out of `server.js` into `lib/` so it can be unit-tested without booting Express (see `lib/health.js`, `lib/pay-periods.js`, `lib/crypto.js`).
+
+## Testing & CI
+
+- Run everything with `npm test` (→ `test/run-all.mjs`). The runner executes every `test/*.test.js` file **in its own process**, continues past failures, and exits non-zero if any suite fails.
+- Suites: `crypto`, `validation`, `health`, `pay-periods` logic, `compliance-tokens`, `compliance-routes`, `plaid-client`, `plaid-sync`, `integration-mocks`. Tests use Node's built-in test facilities — no external test framework, no live Supabase.
+- **CI** (`.github/workflows/ci.yml`, Node 22) on push/PR to `main`: `npm ci` → `node -c server.js` (syntax check) → `npm test`. On merge to `main` it also runs a non-blocking production health smoke check against `/api/health`.
+- After a `git push`, the `ci-check` hook polls GitHub Actions and reports pass/fail so failures can be fixed immediately.
 
 ## Deployment
 
-**Fly.io as of 2026-05-30** (migrated off Render — workspace hit Render's shared 750 free-instance-hours/month cap; the 2 zombie lm-app-api Render services were the main culprit and were deleted). App: `lm-paytrack` (region `sjc`). Sleeps when idle (`min_machines_running = 0`, `auto_stop_machines`) so cost ≈ $0 — paytrack is used a few times per pay period.
+**Fly.io as of 2026-05-30** (migrated off Render — workspace hit Render's shared 750 free-instance-hours/month cap; the 2 zombie lm-app-api Render services were the main culprit and were deleted). App: `lm-paytrack` (region `sjc`).
+
+**Always-on, single machine** (changed from the original sleep-when-idle config): `fly.toml` now sets `auto_stop_machines = "off"` and `min_machines_running = 1` so daily time entry never hits a cold start. One `shared-cpu-1x:512MB` machine running 24/7 ≈ $3.19/mo — under Fly's ~$5/mo invoice waiver, so effectively free AND always warm. **Do not** add a second machine (no HA pair) or bump RAM — either would push past the free threshold. Internal port is **8080** (`http_service.internal_port`). Fly's health check hits `/api/health?deep=0` (liveness only — a DB blip must not restart the machine).
 
 ```bash
 cd paytrack && fly deploy -a lm-paytrack    # token: grep access_token ~/.fly/config.yml; pass -t
@@ -123,14 +177,19 @@ cd paytrack && fly deploy -a lm-paytrack    # token: grep access_token ~/.fly/co
 
 ## Environment Variables (Production)
 
-Set as Fly secrets on `lm-paytrack` (migrated from Render 2026-05-30; values also still in Render service `srv-d632r5m8alac73cbqubg`):
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
+Set as Fly secrets on `lm-paytrack` (migrated from Render 2026-05-30; values also still in Render service `srv-d632r5m8alac73cbqubg`). Manage with `fly secrets set KEY=value -a lm-paytrack`:
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- `PAYTRACK_ENCRYPTION_KEY`
 - `RESEND_API_KEY`
 - `ADMIN_PASSWORD`
-- `PORT` (Render sets automatically)
-- `RENDER_EXTERNAL_URL` (for keep-alive pings)
-- `NODE_ENV=production`
+- `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`
+- `SENTRY_DSN` (error tracking)
+- `CRON_SECRET` (authenticates scheduler HTTP calls)
+- `COMPLIANCE_CONTACT_ENABLED` — **currently UNSET/OFF**; gates ALL contractor email/SMS. Do not enable without Mike's go-live (see `reference_credentials_paytrack.md`).
+- `PORT` (Fly injects `8080` automatically), `NODE_ENV=production`
+
+Note: the old Render `RENDER_EXTERNAL_URL` keep-alive ping was removed (dead code deleted 2026-06 — the always-on Fly machine has no cold start to ping awake).
 
 ## Email
 
@@ -185,7 +244,14 @@ Set as Fly secrets on `lm-paytrack` (migrated from Render 2026-05-30; values als
 
 ## Recent Changes
 
+- **2026-06-11:** Fixed admin rate limiter breaking bank-transaction assign — bumped admin limit 10→100 req/15min, made 429 responses JSON, hardened `adminFetch()` to check `resp.ok` and surface real error messages.
+- **2026-06-02/07:** Standardized admin auth on the `x-admin-password` header across `server.js`, `routes/compliance.js`, `routes/plaid.js` and all 24 frontend admin fetches; removed the legacy `password` header fallback. Deployed + verified live.
+- **2026-06:** Resilience pass — enhanced `/api/health` (liveness vs deep DB probe, extracted to `lib/health.js`), added Sentry (`SENTRY_DSN`-gated), CI workflow + production health smoke check, uptime monitor; removed dead Render keep-alive code.
+- **2026-05-30:** Made the Fly machine always-warm — `auto_stop_machines = off`, `min_machines_running = 1` (no cold starts for daily time entry).
+- **2026-05-30:** Migrated deployment Render → Fly.io (`lm-paytrack`, `sjc`); routing via Cloudflare Worker `paytrack-proxy`.
 - **2026-05-29:** Performance pass — added `compression` (gzip) + HTTP cache-control/ETag headers; eliminated 5 N+1 query patterns (pre-fetch `.in()` + group-by-id) across pay-period summary, invoice email, admin review, admin time-entries, and employee-removal cleanup. All 179 tests pass.
+- **2026-05:** Plaid bank sync (Chase, read-only) for admin transaction assignment; compliance COI/license workflow + contractor-contact kill-switch (`COMPLIANCE_CONTACT_ENABLED`, default OFF).
+- **2026-05:** Frontend split out of inline HTML into `public/js/{index,admin}.js` + `public/css/{index,admin}.css`; added `review.html` and `compliance.html`.
 - **2026-04-16:** Renamed "Employees" → "Team Members" throughout entire app
 - **2026-04-16:** Pre-form overlay for adding team members (replaces inline form), auto-generated PIN
 - **2026-04-16:** Send Link feature: SMS (Twilio) + Email (Resend) for onboarding links
