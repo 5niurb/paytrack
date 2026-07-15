@@ -50,15 +50,11 @@ router.post('/exchange-token', async (req, res) => {
   }
   try {
     const { exchangePublicToken } = require('../server/plaid-client');
-    const { updateRenderEnvVar } = require('../server/render-api');
     const { saveSetting } = require('../server/plaid-sync');
     const { accessToken } = await exchangePublicToken(publicToken);
-    // Persist to DB (durable across deploys) and env
+    // Persist to DB (durable across deploys)
     await saveSetting(supabase, 'plaid_access_token', accessToken, 'PLAID_ACCESS_TOKEN');
     await saveSetting(supabase, 'plaid_cursor', '', 'PLAID_CURSOR');
-    // Also push to Render env (best-effort)
-    await updateRenderEnvVar('PLAID_ACCESS_TOKEN', accessToken).catch(() => {});
-    await updateRenderEnvVar('PLAID_CURSOR', '').catch(() => {});
     res.json({ success: true });
   } catch (e) {
     console.error('[plaid] exchange-token error:', e.message);
@@ -226,8 +222,6 @@ router.delete('/reset', async (req, res) => {
     await supabase.from('payments').delete().not('plaid_transaction_id', 'is', null);
     await supabase.from('plaid_pending').delete().not('plaid_transaction_id', 'is', null);
     await saveSetting(supabase, 'plaid_cursor', '', 'PLAID_CURSOR');
-    const { updateRenderEnvVar } = require('../server/render-api');
-    await updateRenderEnvVar('PLAID_CURSOR', '').catch(() => {});
     res.json({ success: true });
   } catch (e) {
     console.error('[plaid] reset error:', e.message);

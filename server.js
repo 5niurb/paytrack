@@ -206,11 +206,6 @@ const upload = multer({
   },
 });
 
-// Keep-alive ping to prevent Render spin down
-// (Removed setupKeepAlive — it existed to prevent Render free-tier spin-down by
-// self-pinging every 14 min. paytrack is now always-on on Fly (min_machines_running=1),
-// so there's nothing to keep awake; on Fly SELF_URL fell back to localhost anyway.)
-
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
   // Lightweight liveness + dependency check. Monitoring uses this to tell
@@ -294,27 +289,52 @@ app.get('/api/invoice-media/:invoiceId', async (req, res) => {
       (payoutsByDate[p.payment_date] || 0) + parseFloat(p.amount || 0);
   }
 
+  // Batch query: get all client entries and product sales in one call per table (avoid N+1 query pattern)
+  const timeEntryIds = (timeEntries || []).map((e) => e.id);
+
+  const { data: allClients } = timeEntryIds.length > 0
+    ? await supabaseAdmin
+        .from('client_entries')
+        .select('time_entry_id, amount_earned, tip_amount, tip_received_cash')
+        .in('time_entry_id', timeEntryIds)
+    : { data: [] };
+
+  const { data: allSales } = timeEntryIds.length > 0
+    ? await supabaseAdmin
+        .from('product_sales')
+        .select('time_entry_id, commission_amount')
+        .in('time_entry_id', timeEntryIds)
+    : { data: [] };
+
+  // Group results by time_entry_id for fast lookup
+  const clientsByEntry = {};
+  const salesByEntry = {};
+
+  (allClients || []).forEach((c) => {
+    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
+    clientsByEntry[c.time_entry_id].push(c);
+  });
+
+  (allSales || []).forEach((s) => {
+    if (!salesByEntry[s.time_entry_id]) salesByEntry[s.time_entry_id] = [];
+    salesByEntry[s.time_entry_id].push(s);
+  });
+
   const entries = [];
   for (const entry of timeEntries || []) {
-    const { data: clients } = await supabaseAdmin
-      .from('client_entries')
-      .select('amount_earned, tip_amount, tip_received_cash')
-      .eq('time_entry_id', entry.id);
-    const { data: sales } = await supabaseAdmin
-      .from('product_sales')
-      .select('commission_amount')
-      .eq('time_entry_id', entry.id);
+    const clients = clientsByEntry[entry.id] || [];
+    const sales = salesByEntry[entry.id] || [];
 
     let dayCommissions = 0,
       dayTips = 0,
       dayCashTips = 0,
       dayProductCommissions = 0;
-    for (const c of clients || []) {
+    for (const c of clients) {
       dayCommissions += c.amount_earned || 0;
       dayTips += c.tip_amount || 0;
       if (c.tip_received_cash) dayCashTips += c.tip_amount || 0;
     }
-    for (const s of sales || []) dayProductCommissions += s.commission_amount || 0;
+    for (const s of sales) dayProductCommissions += s.commission_amount || 0;
 
     entries.push({
       date: entry.date,
@@ -526,7 +546,7 @@ async function sendInvoiceSms(employeeName, periodStart, periodEnd, totalPayable
     return { sent: false, reason: 'Twilio not configured' };
   }
 
-  const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://paytrack.lemedspa.app';
+  const BASE_URL = 'https://paytrack.lemedspa.app';
   const mediaUrl = `${BASE_URL}/api/invoice-media/${invoiceId}`;
   const totalStr = totalPayable.toFixed(2);
   const body = `Invoice submitted: ${employeeName} (${periodStart}–${periodEnd})\n` +

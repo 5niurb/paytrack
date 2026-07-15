@@ -1,7 +1,6 @@
 'use strict';
 
 const { syncTransactions } = require('./plaid-client');
-const { updateRenderEnvVar } = require('./render-api');
 
 // Build a Map from match-key (lowercase) → employee_id.
 // Uses zelle_name if set and non-empty, otherwise full name.
@@ -202,14 +201,9 @@ async function runSync(supabase) {
     }
   }
 
-  // Advance cursor — save to DB (durable) and try Render env (best-effort)
+  // Advance cursor — persisted to Supabase (durable across deploys)
   if (nextCursor && nextCursor !== cursor) {
     await saveSetting(supabase, 'plaid_cursor', nextCursor, 'PLAID_CURSOR');
-    try {
-      await updateRenderEnvVar('PLAID_CURSOR', nextCursor);
-    } catch (e) {
-      console.warn('Warning: failed to update PLAID_CURSOR in Render (non-fatal):', e.message);
-    }
   }
 
   return {

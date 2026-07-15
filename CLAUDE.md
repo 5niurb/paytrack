@@ -70,7 +70,7 @@ Server (Express + Supabase, no ORM):
 - `routes/` — modular route sub-apps mounted in `server.js`:
   - `compliance.js` → `/api/compliance` (init'd via `initCompliance`)
   - `plaid.js` → `/api/admin/plaid` (init'd via `initPlaid`)
-- `server/` — Plaid + external clients: `plaid-client.js`, `plaid-sync.js`, `render-api.js`
+- `server/` — Plaid clients: `plaid-client.js`, `plaid-sync.js`
 
 Frontend (`public/`, served statically, no bundler):
 - `index.html` + `js/index.js` + `css/index.css` — Employee app (PIN login, time entry, pay review, invoice)
@@ -189,7 +189,7 @@ Set as Fly secrets on `lm-paytrack` (migrated from Render 2026-05-30; values als
 - `COMPLIANCE_CONTACT_ENABLED` — **currently UNSET/OFF**; gates ALL contractor email/SMS. Do not enable without Mike's go-live (see `reference_credentials_paytrack.md`).
 - `PORT` (Fly injects `8080` automatically), `NODE_ENV=production`
 
-Note: the old Render `RENDER_EXTERNAL_URL` keep-alive ping was removed (dead code deleted 2026-06 — the always-on Fly machine has no cold start to ping awake).
+Note: the old Render `RENDER_EXTERNAL_URL` keep-alive ping was removed (dead code deleted 2026-06). The `server/render-api.js` env-var-write-back helper (used only by the old Render-hosted Plaid cursor persistence) was removed 2026-07 — Plaid state persists to Supabase via `saveSetting` only now.
 
 ## Email
 
