@@ -34,6 +34,7 @@ const {
 } = require('./lib/onboarding-validation');
 const { encryptValue } = require('./lib/crypto');
 const { buildHealth } = require('./lib/health');
+const { fetchInvoiceSummary, aggregateEntries } = require('./lib/invoice-summary');
 const { randomUUID } = require('crypto');
 const debug = require('./lib/debug');
 const { router: complianceRouter, init: initCompliance } = require('./routes/compliance');
@@ -268,14 +269,6 @@ app.get('/api/invoice-media/:invoiceId', async (req, res) => {
     .eq('id', inv.employee_id)
     .single();
 
-  const { data: timeEntries } = await supabaseAdmin
-    .from('time_entries')
-    .select('id, date, hours')
-    .eq('employee_id', inv.employee_id)
-    .gte('date', inv.pay_period_start)
-    .lte('date', inv.pay_period_end)
-    .order('date', { ascending: true });
-
   const { data: rawPayouts } = await supabaseAdmin
     .from('payments')
     .select('payment_date, amount')
@@ -289,64 +282,25 @@ app.get('/api/invoice-media/:invoiceId', async (req, res) => {
       (payoutsByDate[p.payment_date] || 0) + parseFloat(p.amount || 0);
   }
 
-  // Batch query: get all client entries and product sales in one call per table (avoid N+1 query pattern)
-  const timeEntryIds = (timeEntries || []).map((e) => e.id);
-
-  const { data: allClients } = timeEntryIds.length > 0
-    ? await supabaseAdmin
-        .from('client_entries')
-        .select('time_entry_id, amount_earned, tip_amount, tip_received_cash')
-        .in('time_entry_id', timeEntryIds)
-    : { data: [] };
-
-  const { data: allSales } = timeEntryIds.length > 0
-    ? await supabaseAdmin
-        .from('product_sales')
-        .select('time_entry_id, commission_amount')
-        .in('time_entry_id', timeEntryIds)
-    : { data: [] };
-
-  // Group results by time_entry_id for fast lookup
-  const clientsByEntry = {};
-  const salesByEntry = {};
-
-  (allClients || []).forEach((c) => {
-    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
-    clientsByEntry[c.time_entry_id].push(c);
+  // Batched fetch + aggregation via the shared helper. Payouts are a route-only
+  // concern (not part of the commissions/tips math) and are merged in below.
+  const { entries: aggregated } = await fetchInvoiceSummary(supabaseAdmin, {
+    employeeId: inv.employee_id,
+    periodStart: inv.pay_period_start,
+    periodEnd: inv.pay_period_end,
+    hourlyWage: emp?.hourly_wage || 0,
   });
 
-  (allSales || []).forEach((s) => {
-    if (!salesByEntry[s.time_entry_id]) salesByEntry[s.time_entry_id] = [];
-    salesByEntry[s.time_entry_id].push(s);
-  });
-
-  const entries = [];
-  for (const entry of timeEntries || []) {
-    const clients = clientsByEntry[entry.id] || [];
-    const sales = salesByEntry[entry.id] || [];
-
-    let dayCommissions = 0,
-      dayTips = 0,
-      dayCashTips = 0,
-      dayProductCommissions = 0;
-    for (const c of clients) {
-      dayCommissions += c.amount_earned || 0;
-      dayTips += c.tip_amount || 0;
-      if (c.tip_received_cash) dayCashTips += c.tip_amount || 0;
-    }
-    for (const s of sales) dayProductCommissions += s.commission_amount || 0;
-
-    entries.push({
-      date: entry.date,
-      hours: entry.hours,
-      wages: entry.hours * (emp?.hourly_wage || 0),
-      commissions: dayCommissions,
-      productCommissions: dayProductCommissions,
-      tips: dayTips,
-      cashTips: dayCashTips,
-      payouts: payoutsByDate[entry.date] || 0,
-    });
-  }
+  const entries = aggregated.map((e) => ({
+    date: e.date,
+    hours: e.hours,
+    wages: e.wages,
+    commissions: e.commissions,
+    productCommissions: e.productCommissions,
+    tips: e.tips,
+    cashTips: e.cashTips,
+    payouts: payoutsByDate[e.date] || 0,
+  }));
 
   const svgStr = buildInvoiceImageSvg(
     emp?.name || 'Employee',
@@ -991,75 +945,16 @@ app.get('/api/pay-period/:employeeId', async (req, res) => {
     .eq('id', parseInt(employeeId))
     .single();
 
-  // Get time entries for this period
-  const { data: entries } = await supabaseAdmin
-    .from('time_entries')
-    .select('id, date, hours')
-    .eq('employee_id', parseInt(employeeId))
-    .gte('date', startDate)
-    .lte('date', endDate)
-    .order('date', { ascending: true });
-
-  let totalHours = 0;
-  let totalCommissions = 0;
-  let totalTips = 0;
-  let totalCashTips = 0;
-  let totalProductCommissions = 0;
-
-  // Batch query: get all client entries and product sales in one call per table (avoid N+1 query pattern)
-  const entryIds = (entries || []).map(e => e.id);
-
-  const { data: allClients } = entryIds.length > 0
-    ? await supabaseAdmin
-        .from('client_entries')
-        .select('time_entry_id, amount_earned, tip_amount, tip_received_cash')
-        .in('time_entry_id', entryIds)
-    : { data: [] };
-
-  const { data: allSales } = entryIds.length > 0
-    ? await supabaseAdmin
-        .from('product_sales')
-        .select('time_entry_id, commission_amount')
-        .in('time_entry_id', entryIds)
-    : { data: [] };
-
-  // Group results by time_entry_id for fast lookup
-  const clientsByEntry = {};
-  const salesByEntry = {};
-
-  (allClients || []).forEach(c => {
-    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
-    clientsByEntry[c.time_entry_id].push(c);
-  });
-
-  (allSales || []).forEach(s => {
-    if (!salesByEntry[s.time_entry_id]) salesByEntry[s.time_entry_id] = [];
-    salesByEntry[s.time_entry_id].push(s);
-  });
-
-  // Process entries with pre-fetched data
-  for (const entry of (entries || [])) {
-    totalHours += entry.hours;
-
-    // Process client entries for this entry
-    const clients = clientsByEntry[entry.id] || [];
-    for (const c of clients) {
-      totalCommissions += c.amount_earned || 0;
-      totalTips += c.tip_amount || 0;
-      if (c.tip_received_cash) {
-        totalCashTips += c.tip_amount || 0;
-      }
-    }
-
-    // Process product sales for this entry
-    const sales = salesByEntry[entry.id] || [];
-    for (const s of sales) {
-      totalProductCommissions += s.commission_amount || 0;
-    }
-  }
-
   const hourlyWage = employee?.hourly_wage || 0;
-  const totalWages = totalHours * hourlyWage;
+
+  // Batched fetch + aggregation via the shared helper (single source of truth
+  // for commissions/tips/wages/payable math — see lib/invoice-summary.js).
+  const { entries: aggregated, totals } = await fetchInvoiceSummary(supabaseAdmin, {
+    employeeId: parseInt(employeeId),
+    periodStart: startDate,
+    periodEnd: endDate,
+    hourlyWage,
+  });
 
   // Check if invoice already submitted for this period
   const { data: existingInvoice } = await supabaseAdmin
@@ -1074,15 +969,17 @@ app.get('/api/pay-period/:employeeId', async (req, res) => {
     periodStart: startDate,
     periodEnd: endDate,
     periodOffset,
-    totalHours,
-    totalWages,
-    totalCommissions,
-    totalTips,
-    totalCashTips,
-    totalProductCommissions,
-    totalPayable: totalWages + totalCommissions + totalTips + totalProductCommissions - totalCashTips,
+    totalHours: totals.totalHours,
+    totalWages: totals.totalWages,
+    totalCommissions: totals.totalCommissions,
+    totalTips: totals.totalTips,
+    totalCashTips: totals.totalCashTips,
+    totalProductCommissions: totals.totalProductCommissions,
+    totalPayable: totals.totalPayable,
     hourlyWage,
-    entries: entries || [],
+    // Preserve the original response shape: bare time-entry rows (id, date, hours),
+    // not the aggregated day objects.
+    entries: aggregated.map((e) => ({ id: e.id, date: e.date, hours: e.hours })),
     invoiceSubmitted: !!existingInvoice,
     invoiceDate: existingInvoice?.submitted_at
   });
@@ -1152,15 +1049,6 @@ app.post('/api/submit-invoice', async (req, res) => {
     return res.json({ success: false, message: 'Failed to create invoice' });
   }
 
-  // Re-fetch entries for the email detail table
-  const { data: emailEntries } = await supabaseAdmin
-    .from('time_entries')
-    .select('id, date, hours')
-    .eq('employee_id', employeeId)
-    .gte('date', periodStart)
-    .lte('date', periodEnd)
-    .order('date', { ascending: true });
-
   // Fetch payouts for the period
   const { data: emailPayouts } = await supabaseAdmin
     .from('payments')
@@ -1176,68 +1064,27 @@ app.post('/api/submit-invoice', async (req, res) => {
     totalPayouts += parseFloat(p.amount || 0);
   }
 
-  // Batch query: get all client entries and product sales (avoid N+1 query pattern)
-  const emailEntryIds = (emailEntries || []).map(e => e.id);
-
-  const { data: allEmailClients } = emailEntryIds.length > 0
-    ? await supabaseAdmin
-        .from('client_entries')
-        .select('time_entry_id, amount_earned, tip_amount, tip_received_cash')
-        .in('time_entry_id', emailEntryIds)
-    : { data: [] };
-
-  const { data: allEmailSales } = emailEntryIds.length > 0
-    ? await supabaseAdmin
-        .from('product_sales')
-        .select('time_entry_id, commission_amount')
-        .in('time_entry_id', emailEntryIds)
-    : { data: [] };
-
-  // Group results by time_entry_id for fast lookup
-  const emailClientsByEntry = {};
-  const emailSalesByEntry = {};
-
-  (allEmailClients || []).forEach(c => {
-    if (!emailClientsByEntry[c.time_entry_id]) emailClientsByEntry[c.time_entry_id] = [];
-    emailClientsByEntry[c.time_entry_id].push(c);
+  // Batched fetch + aggregation via the shared helper for the email/SMS detail
+  // table. Note: this route trusts the client-supplied period totals in the
+  // request body (inserted into the invoice above) and only recomputes the
+  // per-day breakdown here. Payouts are merged in below (route-only concern).
+  const { entries: aggregated } = await fetchInvoiceSummary(supabaseAdmin, {
+    employeeId,
+    periodStart,
+    periodEnd,
+    hourlyWage: employee?.hourly_wage || 0,
   });
 
-  (allEmailSales || []).forEach(s => {
-    if (!emailSalesByEntry[s.time_entry_id]) emailSalesByEntry[s.time_entry_id] = [];
-    emailSalesByEntry[s.time_entry_id].push(s);
-  });
-
-  const detailedEntries = [];
-  for (const entry of (emailEntries || [])) {
-    const clients = emailClientsByEntry[entry.id] || [];
-    const sales = emailSalesByEntry[entry.id] || [];
-
-    let dayCommissions = 0;
-    let dayTips = 0;
-    let dayCashTips = 0;
-    for (const c of clients) {
-      dayCommissions += c.amount_earned || 0;
-      dayTips += c.tip_amount || 0;
-      if (c.tip_received_cash) dayCashTips += c.tip_amount || 0;
-    }
-    let dayProductCommissions = 0;
-    for (const s of sales) {
-      dayProductCommissions += s.commission_amount || 0;
-    }
-    const dayPayouts = payoutsByDate[entry.date] || 0;
-    const dayWages = entry.hours * (employee?.hourly_wage || 0);
-
-    detailedEntries.push({
-      date: entry.date,
-      hours: entry.hours,
-      wages: dayWages,
-      commissions: dayCommissions,
-      productCommissions: dayProductCommissions,
-      tips: dayTips,
-      cashTips: dayCashTips,
-      payouts: dayPayouts,
-    });
-  }
+  const detailedEntries = aggregated.map((e) => ({
+    date: e.date,
+    hours: e.hours,
+    wages: e.wages,
+    commissions: e.commissions,
+    productCommissions: e.productCommissions,
+    tips: e.tips,
+    cashTips: e.cashTips,
+    payouts: payoutsByDate[e.date] || 0,
+  }));
 
   // Try to send email
   const employeeData = {
@@ -1345,92 +1192,35 @@ app.get('/api/invoice-preview/:employeeId', async (req, res) => {
   // Use the earlier of periodEnd or today (to exclude future dates)
   const effectiveEndDate = periodEnd <= todayLA ? periodEnd : todayLA;
 
-  // Get all entries for the period with details (only up to today in LA time)
-  const { data: entries } = await supabaseAdmin
-    .from('time_entries')
-    .select('id, date, start_time, end_time, hours')
-    .eq('employee_id', parseInt(employeeId))
-    .gte('date', periodStart)
-    .lte('date', effectiveEndDate)
-    .order('date', { ascending: false }); // Descending order (most recent first)
-
-  const detailedEntries = [];
-  let totalHours = 0;
-  let totalCommissions = 0;
-  let totalTips = 0;
-  let totalCashTips = 0;
-  let totalProductCommissions = 0;
-
-  // Batch query all client_entries and product_sales for O(1) lookup
-  const entryIds = (entries || []).map(e => e.id);
-  const { data: allClients } = entryIds.length > 0
-    ? await supabaseAdmin
-        .from('client_entries')
-        .select('time_entry_id, client_name, procedure_name, amount_earned, tip_amount, tip_received_cash')
-        .in('time_entry_id', entryIds)
-    : { data: [] };
-
-  const { data: allProducts } = entryIds.length > 0
-    ? await supabaseAdmin
-        .from('product_sales')
-        .select('time_entry_id, product_name, sale_amount, commission_amount')
-        .in('time_entry_id', entryIds)
-    : { data: [] };
-
-  // Group by time_entry_id for O(1) lookup
-  const clientsByEntry = {};
-  const productsByEntry = {};
-  (allClients || []).forEach(c => {
-    if (!clientsByEntry[c.time_entry_id]) clientsByEntry[c.time_entry_id] = [];
-    clientsByEntry[c.time_entry_id].push(c);
-  });
-  (allProducts || []).forEach(p => {
-    if (!productsByEntry[p.time_entry_id]) productsByEntry[p.time_entry_id] = [];
-    productsByEntry[p.time_entry_id].push(p);
+  // Batched fetch + aggregation via the shared helper. This route widens the
+  // selected columns (start_time/end_time, client_name/procedure_name,
+  // product_name/sale_amount) for its detailed UI, orders descending (most
+  // recent first), and clamps to today's LA date to hide future entries.
+  const { entries: aggregated, totals } = await fetchInvoiceSummary(supabaseAdmin, {
+    employeeId: parseInt(employeeId),
+    periodStart,
+    periodEnd: effectiveEndDate,
+    hourlyWage: employee.hourly_wage,
+    order: { column: 'date', ascending: false },
+    entryColumns: 'id, date, start_time, end_time, hours',
+    clientColumns: 'time_entry_id, client_name, procedure_name, amount_earned, tip_amount, tip_received_cash',
+    productColumns: 'time_entry_id, product_name, sale_amount, commission_amount',
   });
 
-  for (const entry of (entries || [])) {
-    const clients = clientsByEntry[entry.id] || [];
-    const products = productsByEntry[entry.id] || [];
-
-    let dayCommissions = 0;
-    let dayTips = 0;
-    let dayCashTips = 0;
-    let dayProductCommissions = 0;
-
-    for (const c of clients) {
-      dayCommissions += c.amount_earned || 0;
-      dayTips += c.tip_amount || 0;
-      if (c.tip_received_cash) dayCashTips += c.tip_amount || 0;
-    }
-
-    for (const p of products) {
-      dayProductCommissions += p.commission_amount || 0;
-    }
-
-    totalHours += entry.hours;
-    totalCommissions += dayCommissions;
-    totalTips += dayTips;
-    totalCashTips += dayCashTips;
-    totalProductCommissions += dayProductCommissions;
-
-    detailedEntries.push({
-      id: entry.id, // Include entry ID for delete functionality
-      date: entry.date,
-      startTime: entry.start_time,
-      endTime: entry.end_time,
-      hours: entry.hours,
-      wages: entry.hours * employee.hourly_wage,
-      commissions: dayCommissions,
-      productCommissions: dayProductCommissions,
-      tips: dayTips,
-      cashTips: dayCashTips,
-      clients: clients,
-      products: products
-    });
-  }
-
-  const totalWages = totalHours * employee.hourly_wage;
+  const detailedEntries = aggregated.map((e) => ({
+    id: e.id, // Include entry ID for delete functionality
+    date: e.date,
+    startTime: e.start_time,
+    endTime: e.end_time,
+    hours: e.hours,
+    wages: e.wages,
+    commissions: e.commissions,
+    productCommissions: e.productCommissions,
+    tips: e.tips,
+    cashTips: e.cashTips,
+    clients: e.clients,
+    products: e.products,
+  }));
 
   res.json({
     employee: {
@@ -1442,13 +1232,13 @@ app.get('/api/invoice-preview/:employeeId', async (req, res) => {
     periodEnd,
     entries: detailedEntries,
     summary: {
-      totalHours,
-      totalWages,
-      totalCommissions,
-      totalProductCommissions,
-      totalTips,
-      totalCashTips,
-      totalPayable: totalWages + totalCommissions + totalTips + totalProductCommissions - totalCashTips
+      totalHours: totals.totalHours,
+      totalWages: totals.totalWages,
+      totalCommissions: totals.totalCommissions,
+      totalProductCommissions: totals.totalProductCommissions,
+      totalTips: totals.totalTips,
+      totalCashTips: totals.totalCashTips,
+      totalPayable: totals.totalPayable
     }
   });
 });
