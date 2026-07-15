@@ -1,11 +1,12 @@
 # paytrack (LM PayTrack) on Fly.io
 # Migrated from Render 2026-05-30 to escape the shared 750 free-instance-hours cap.
 #
-# Always-on (min_machines_running = 1) so employees entering time daily never hit
-# a cold start. A single shared-cpu-1x:512MB machine running 24/7 ≈ $3.19/mo —
-# under Fly's ~$5/mo invoice waiver, so it's effectively free AND always warm.
-# KEEP IT TO ONE MACHINE (no HA pair) and don't bump RAM — a second machine or
-# larger size would push past the free threshold.
+# Sleep-when-idle (per Mike 2026-07-15): the ~$5 invoice waiver is already consumed
+# by lm-app's two machines, so paytrack's 24/7 machine was actually billed (~$3.19/mo).
+# auto_stop + min 0 → cost ≈ $0; first request after idle pays a few seconds of
+# cold start, acceptable for a few-times-per-pay-period app. Longer term: consolidate
+# paytrack into the lm-app API (always-on anyway) — see ecosystem-review 2026-07-15.
+# KEEP IT TO ONE MACHINE (no HA pair) and don't bump RAM.
 app = "lm-paytrack"
 primary_region = "sjc"
 
@@ -14,9 +15,9 @@ primary_region = "sjc"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"    # NEVER auto-stop — keep the single machine always warm
-  auto_start_machines = true    # belt-and-suspenders if it ever does stop
-  min_machines_running = 1      # one machine always running — no cold starts
+  auto_stop_machines = "stop"   # sleep when idle (Mike 2026-07-15 — does not need to be always-on)
+  auto_start_machines = true    # wake on first request
+  min_machines_running = 0      # cost ≈ $0 when idle
 
   [http_service.http_checks]
     # Liveness only (deep=0 skips the Supabase probe) — a DB blip shouldn't make
