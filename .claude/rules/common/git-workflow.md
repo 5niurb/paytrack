@@ -8,7 +8,7 @@
 - Detail 1
 - Detail 2
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ```
 
 Examples:
