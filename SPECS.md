@@ -28,6 +28,12 @@
 - [ ] Invalid PIN shows error
 - [ ] Successful login loads main app with employee context
 - [ ] Employee can change PIN from within app
+- [ ] Rate limiting: per-IP limiter (10 attempts / 15 min) on verify-pin + change-pin
+- [ ] Per-account lockout (2026-07): 5 consecutive failed attempts against one employee
+      (via change-pin's claimed employeeId) → 15-min lockout for that account, independent
+      of IP. Successful auth clears the counter. Messages stay generic — a locked account
+      given the correct PIN gets the same "Invalid PIN" response (no lock-state oracle).
+      Table: `pin_lockouts` (migration 011); logic: `lib/pin-lockout.js`.
 
 ---
 

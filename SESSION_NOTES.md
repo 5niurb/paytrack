@@ -1210,3 +1210,21 @@ edit css/js  ──> fly deploy lm-paytrack ──> origin fresh
 - Deploy: `cd paytrack && TOKEN=$(grep access_token ~/.fly/config.yml | sed 's/access_token: *//' | tr -d '"') && fly deploy -a lm-paytrack -t "$TOKEN"`
 - Verify served-fresh: node https GET `paytrack.lemedspa.app/{css/index.css,js/index.js,/}` and grep for the change (curl is blocked by context-mode — use node `https.get`).
 - Worker redeploy: CF API multipart PUT to `/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/paytrack-proxy` with X-Auth-Email/X-Auth-Key (Global key).
+
+## Session — 2026-07-15 (Wave 2.B: monolith split + PIN hardening)
+**Focus:** Split the 2,887-line server.js monolith, extract the 4x-duplicated invoice aggregation math, add per-account PIN lockout.
+**Accomplished:**
+- **lib/invoice-summary.js** — single source of truth for the batched commissions/tips/cash-tips/product-commissions/wages/payable math previously copy-pasted into 4 routes (pay-period, submit-invoice, invoice-media, invoice-preview). Characterization tests + a 500-run randomized differential test prove byte-identical output vs the old inline code. **Finding: the four copies had NO divergent money math** — differences were only in fetch scope (payouts, ordering, date-clamping, display columns), which stay in the routes.
+- **server.js split 2,696 → 809 lines** into routes/{employees,time-entries,invoices,onboarding,admin}.js following the compliance.js init(deps) pattern. All 47 route method+path pairs verified byte-identical pre/post. Boot-smoke tested live (health 200, PIN rejects, admin 401).
+- **Per-account PIN lockout** — 5 consecutive failed attempts vs one employee → 15-min lock (independent of the per-IP limiter, which stays). `pin_lockouts` table (migration 011, APPLIED to prod Supabase). verify-pin returns identical "Invalid PIN" for a locked account + correct pin (no lock-state oracle). E2E verified live: 5 bad change-pin attempts → 6th got 429; test row cleaned up.
+**Diagram:**
+```
+            ┌─ routes/employees.js    (admin verify, CRUD, PII)
+server.js ──┼─ routes/time-entries.js (verify-pin/change-pin ──> lib/pin-lockout)
+ (809 ln)   ┼─ routes/invoices.js  ───┐
+            ┼─ routes/onboarding.js   ├──> lib/invoice-summary.js (ONE copy of $ math)
+            └─ routes/admin.js        ┘
+```
+**Current State:** All 11 suites green (~252 assertions). Committed: 68a588a (extraction), 66a2ceb (split), 238c99b (lockout). NOT deployed — orchestrator deploys.
+**Issues:** None known. Lockout degrades gracefully if migration missing (already applied to prod, so moot).
+**Next Steps:** Orchestrator deploy (`fly deploy -a lm-paytrack`). Post-deploy, verify /api/health and a PIN login.

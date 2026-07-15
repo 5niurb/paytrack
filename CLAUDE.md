@@ -59,17 +59,25 @@ Requires `.env` file with:
 ## Key Files & Layout
 
 Server (Express + Supabase, no ORM):
-- `server.js` — main Express app: middleware, most API routes, Supabase client, startup guards (~2900 lines; the large one to grep)
+- `server.js` — Express bootstrap: middleware, startup guards, Supabase clients, health routes, invoice email/SMS/SVG presentation helpers, and route-module mounting (~810 lines; split 2026-07, was a 2,900-line monolith)
 - `lib/` — pure, unit-tested helpers extracted from `server.js`:
   - `pay-periods.js` — 26-period-per-year date logic (LA timezone)
   - `crypto.js` — AES-256-GCM encrypt/decrypt for onboarding PII
   - `health.js` — health-report builder (liveness vs deep DB probe)
+  - `invoice-summary.js` — SINGLE source of truth for the commissions/tips/wages/payable aggregation used by all four invoice/pay-period routes (extracted 2026-07; characterization + differential tested)
+  - `pin-lockout.js` — per-account PIN lockout (5 fails → 15-min lock; `pin_lockouts` table)
   - `onboarding-validation.js` — server-side onboarding form validation (also shared with tests)
   - `compliance-tokens.js`, `compliance-scan.mjs`, `compliance-notifications.mjs` — compliance job pieces
   - `debug.js` — DEBUG-gated logging
-- `routes/` — modular route sub-apps mounted in `server.js`:
+- `routes/` — modular route sub-apps mounted in `server.js`. All except compliance/plaid use full paths inside the router and mount bare (`app.use(router)`) with deps injected via a shared `routeDeps` object:
   - `compliance.js` → `/api/compliance` (init'd via `initCompliance`)
   - `plaid.js` → `/api/admin/plaid` (init'd via `initPlaid`)
+  - `employees.js` — admin verify + team-member CRUD/PII/delete
+  - `time-entries.js` — verify-pin, change-pin (+ per-account lockout), check-conflict, time-entry CRUD, admin time-entries
+  - `invoices.js` — invoice-media, pay-period, submit-invoice, invoice-preview, payouts, admin invoices/payments/tax-filings
+  - `onboarding.js` — onboarding flow, send-link, employee documents, compliance-items
+  - `admin.js` — storage signed-url, `/admin` page
+  - Gotcha: middleware injected via `init(deps)` (pinRateLimit, multer `upload`) can't be passed positionally to `router.METHOD` — it's undefined at registration time. Use the deferred-wrapper pattern (`pinLimit`, `uploadSingle`) already in those files.
 - `server/` — Plaid clients: `plaid-client.js`, `plaid-sync.js`
 
 Frontend (`public/`, served statically, no bundler):
@@ -82,7 +90,7 @@ Frontend (`public/`, served statically, no bundler):
 
 Data & config:
 - `supabase-schema.sql` — base database schema (paste into Supabase SQL Editor)
-- `migrations/` — numbered incremental migrations (`002`–`010`); apply in order
+- `migrations/` — numbered incremental migrations (`002`–`011`); apply in order
 - `fly.toml`, `Dockerfile` — Fly.io deployment
 - `render.yaml` — legacy Render config (out of traffic path; kept for reference)
 - `test/` — Node test suites; `.github/workflows/ci.yml` — CI
@@ -157,7 +165,7 @@ All dates use Los Angeles timezone (`America/Los_Angeles`).
 ## Testing & CI
 
 - Run everything with `npm test` (→ `test/run-all.mjs`). The runner executes every `test/*.test.js` file **in its own process**, continues past failures, and exits non-zero if any suite fails.
-- Suites: `crypto`, `validation`, `health`, `pay-periods` logic, `compliance-tokens`, `compliance-routes`, `plaid-client`, `plaid-sync`, `integration-mocks`. Tests use Node's built-in test facilities — no external test framework, no live Supabase.
+- Suites: `crypto`, `validation`, `health`, `pay-periods` logic, `compliance-tokens`, `compliance-routes`, `plaid-client`, `plaid-sync`, `integration-mocks`, `invoice-summary` (characterization of the shared aggregation math), `pin-lockout`. Tests use Node's built-in test facilities — no external test framework, no live Supabase.
 - **CI** (`.github/workflows/ci.yml`, Node 22) on push/PR to `main`: `npm ci` → `node -c server.js` (syntax check) → `npm test`. On merge to `main` it also runs a non-blocking production health smoke check against `/api/health`.
 - After a `git push`, the `ci-check` hook polls GitHub Actions and reports pass/fail so failures can be fixed immediately.
 
@@ -244,6 +252,7 @@ Note: the old Render `RENDER_EXTERNAL_URL` keep-alive ping was removed (dead cod
 
 ## Recent Changes
 
+- **2026-07-15 (Wave 2.B):** (1) Extracted the 4x-duplicated invoice aggregation math into `lib/invoice-summary.js` (characterization + 500-run differential tests prove identical output; the four copies had NO divergent-math bug). (2) Split `server.js` 2,696→809 lines into 5 route modules (`employees`, `time-entries`, `invoices`, `onboarding`, `admin`) — pure movement, all 47 route paths byte-identical. (3) Per-account PIN lockout: 5 consecutive failures → 15-min lock (`pin_lockouts` table, migration 011 applied to prod; per-IP limiter unchanged). Suites 9→11, all green.
 - **2026-06-11:** Fixed admin rate limiter breaking bank-transaction assign — bumped admin limit 10→100 req/15min, made 429 responses JSON, hardened `adminFetch()` to check `resp.ok` and surface real error messages.
 - **2026-06-02/07:** Standardized admin auth on the `x-admin-password` header across `server.js`, `routes/compliance.js`, `routes/plaid.js` and all 24 frontend admin fetches; removed the legacy `password` header fallback. Deployed + verified live.
 - **2026-06:** Resilience pass — enhanced `/api/health` (liveness vs deep DB probe, extracted to `lib/health.js`), added Sentry (`SENTRY_DSN`-gated), CI workflow + production health smoke check, uptime monitor; removed dead Render keep-alive code.
