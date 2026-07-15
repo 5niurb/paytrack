@@ -7,7 +7,7 @@
 
 const express = require('express');
 const router = express.Router();
-
+const { isEmployeeLocked, recordAttempt } = require('../lib/pin-lockout');
 
 let supabaseAdmin, verifyAdminPassword, ADMIN_PASSWORD, verifyEmployeePin, pinRateLimit;
 
@@ -20,6 +20,27 @@ function init(deps) {
 // registration time). This thin wrapper resolves it per-request.
 function pinLimit(req, res, next) {
   return pinRateLimit(req, res, next);
+}
+
+// Per-account lockout helpers (lib/pin-lockout, migration 011). These wrap the
+// store calls in try/catch so a lockout-layer failure (e.g. table not yet
+// migrated) degrades to the pre-lockout behavior instead of breaking login.
+// The per-IP rate limiter above stays as the first line of defense.
+async function accountLocked(employeeId) {
+  try {
+    return await isEmployeeLocked(supabaseAdmin, employeeId);
+  } catch (err) {
+    console.error('[PinLockout] lock check failed:', err.message);
+    return false;
+  }
+}
+
+async function noteAttempt(employeeId, success) {
+  try {
+    await recordAttempt(supabaseAdmin, employeeId, success);
+  } catch (err) {
+    console.error('[PinLockout] record failed:', err.message);
+  }
 }
 
 router.post('/api/verify-pin', pinLimit, async (req, res) => {
@@ -36,14 +57,33 @@ router.post('/api/verify-pin', pinLimit, async (req, res) => {
     .single();
 
   if (error || !employee) {
+    // No matched account to attribute this failure to (the request carries only
+    // the PIN), so per-account tracking can't apply here — the per-IP limiter
+    // is the throttle for unattributed guessing.
+    res.json({ success: false, message: 'Invalid PIN' });
+  } else if (await accountLocked(employee.id)) {
+    // Locked account: respond EXACTLY like a wrong PIN. A distinct "locked"
+    // message here would act as an oracle confirming the guessed PIN is
+    // correct, defeating the lockout's purpose.
     res.json({ success: false, message: 'Invalid PIN' });
   } else {
+    await noteAttempt(employee.id, true); // clear any stale failure counter
     res.json({ success: true, employee });
   }
 });
 
 router.post('/api/change-pin', pinLimit, async (req, res) => {
   const { employeeId, currentPin, newPin } = req.body;
+
+  // Per-account lockout: this route names its target employee, so repeated
+  // wrong-currentPin attempts against that account lock it for 15 minutes
+  // (5 consecutive failures), independent of source IP. Generic message —
+  // same shape the per-IP limiter uses.
+  if (await accountLocked(employeeId)) {
+    return res
+      .status(429)
+      .json({ success: false, message: 'Too many attempts. Please try again later.' });
+  }
 
   // Verify current PIN
   const { data: employee, error: verifyError } = await supabaseAdmin
@@ -54,8 +94,11 @@ router.post('/api/change-pin', pinLimit, async (req, res) => {
     .single();
 
   if (verifyError || !employee) {
+    await noteAttempt(employeeId, false);
     return res.json({ success: false, message: 'Current PIN is incorrect' });
   }
+
+  await noteAttempt(employeeId, true);
 
   // Check if new PIN is already used
   const { data: existing } = await supabaseAdmin
