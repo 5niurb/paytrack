@@ -1,10 +1,27 @@
 'use strict';
 
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const { generateToken, isTokenExpired } = require('../lib/compliance-tokens');
 
 const COI_FIELDS = ['insurer_name', 'policy_number', 'expiration_date', 'per_occurrence', 'aggregate'];
+
+// Timing-safe secret comparison (webhook/cron shared secrets, not the admin
+// password — that uses verifyAdminPassword below). Buffer.from length must
+// match for timingSafeEqual, so a mismatched length is treated as "not equal"
+// via try/catch rather than short-circuiting on `.length` first — same
+// fail-closed pattern used for ADMIN_PASSWORD comparison in server.js.
+function timingSafeEqualString(provided, expected) {
+  if (!provided || !expected) return false;
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+  try {
+    return crypto.timingSafeEqual(providedBuf, expectedBuf);
+  } catch {
+    return false;
+  }
+}
 
 // Supabase client and admin password are passed in via module.exports factory
 // (avoids circular dependency with server.js and keeps secrets out of this file)
@@ -44,7 +61,7 @@ async function getExtractor() {
   return extractor;
 }
 
-const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://paytrack.lemedspa.app';
+const BASE_URL = 'https://paytrack.lemedspa.app';
 
 // Helper: look up a compliance_request by token, return it or send 404/410
 async function findValidRequest(res, token) {
@@ -81,7 +98,7 @@ function pickCOIFields(source) {
 // ─────────────────────────────────────────────
 router.post('/coi-received', async (req, res) => {
   const secret = req.headers['x-email-worker-secret'];
-  if (secret !== process.env.EMAIL_WORKER_SECRET) {
+  if (!timingSafeEqualString(secret, process.env.EMAIL_WORKER_SECRET)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   const { employee_id, storage_path } = req.body;
@@ -436,7 +453,7 @@ const emailUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize
 // POST /api/compliance/coi-inbound — called by Cloudflare Email Worker
 router.post('/coi-inbound', emailUpload.single('file'), async (req, res) => {
   const secret = req.headers['x-email-worker-secret'];
-  if (secret !== process.env.EMAIL_WORKER_SECRET) {
+  if (!timingSafeEqualString(secret, process.env.EMAIL_WORKER_SECRET)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -781,7 +798,7 @@ router.post('/esign-webhook', async (req, res) => {
 // ─────────────────────────────────────────────
 router.post('/scan', async (req, res) => {
   const cronSecret = req.headers['x-cron-secret'];
-  if (cronSecret !== process.env.CRON_SECRET) {
+  if (!timingSafeEqualString(cronSecret, process.env.CRON_SECRET)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
