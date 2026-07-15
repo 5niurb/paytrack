@@ -16,7 +16,7 @@ function init(deps) {
 }
 
 router.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
 });
 
 router.get('/api/admin/storage/signed-url', async (req, res) => {

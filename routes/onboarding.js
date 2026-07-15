@@ -352,7 +352,7 @@ router.get('/onboarding/:token', async (req, res) => {
     `);
   }
 
-  res.sendFile(path.join(__dirname, 'public', 'review.html'));
+  res.sendFile(path.join(__dirname, '..', 'public', 'review.html'));
 });
 
 router.post('/api/onboarding/:token', async (req, res) => {
