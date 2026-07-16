@@ -223,7 +223,6 @@ Note: the old Render `RENDER_EXTERNAL_URL` keep-alive ping was removed (dead cod
 - **`/deploy`** — Push to main and verify Render deployment
 - **`/capture-specs`** — Reviews current session and batch-updates SPECS.md with new requirements, acceptance criteria, and design decisions
 - **`/checkpoint`** — Git-backed save points. Supports `create`, `list`, `restore <sha>`. Auto-checkpoints before restore
-- **`/orchestrate`** — Chains agents through dev pipeline: plan → implement → review → qa → verify. Supports `feature`, `bugfix`, `refactor` modes. Final verdict: SHIP/NEEDS WORK/BLOCKED
 - **`/api-design`** — Interactive API specification and endpoint planning with request/response examples
 - **`/postgres-patterns`** — Analyzes and documents PostgreSQL query patterns, indexes, and optimization opportunities
 - **`/database-migrations`** — Generates and verifies schema migrations with rollback safety checks

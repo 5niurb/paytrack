@@ -39,9 +39,23 @@ Suggests manual `/compact` at strategic points rather than relying on arbitrary 
 ## Hook Setup
 
 The `suggest-compact.mjs` script runs on PreToolUse (Edit/Write) and:
-1. Tracks tool call count per session
-2. Suggests at configurable threshold (default: 50 calls)
-3. Reminds every 25 calls after threshold
+1. Reads recent observations from `observations.jsonl` (written by the observe hook)
+2. Detects workflow phase from tool patterns: research, implementation, testing, debugging, exploration
+3. Suggests /compact at **phase transitions** (research→implementation, debugging→next feature, etc.)
+4. Detects **context bloat** from long read/search streaks (25+ consecutive reads without an edit)
+5. Falls back to count-based milestones (50 calls, then every 25)
+
+### Phase Detection
+The script analyzes the last 20 tool calls to classify the current phase:
+- **research**: 70%+ reads/greps/searches, few edits
+- **implementation**: 6+ edits in last 20 calls
+- **testing**: 8+ bash calls (running tests, builds, curls)
+- **debugging**: errors detected + mix of reads and bash
+- **exploration**: 3+ subagent Task calls
+
+### Dependency
+Requires the `observe.mjs` hook (continuous-learning-v2) to be active — it writes the observations
+that suggest-compact reads for phase detection. Without it, falls back to count-only mode.
 
 ## Best Practices
 

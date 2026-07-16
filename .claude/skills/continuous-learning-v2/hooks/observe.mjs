@@ -2,8 +2,9 @@
 /**
  * Continuous Learning v2 — Observation Hook (Node.js port)
  *
- * Captures tool use events for pattern analysis.
- * Claude Code passes hook data via stdin as JSON.
+ * Captures tool use events with structured metadata for pattern analysis.
+ * Extracts file paths, error signals, command types, and search patterns
+ * so instinct extraction can identify behavioral patterns — not just tool counts.
  *
  * Hook config (in .claude/settings.json):
  * {
@@ -14,21 +15,18 @@
  * }
  */
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, statSync, renameSync } from 'fs';
+import { readFileSync, appendFileSync, mkdirSync, existsSync, statSync, renameSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, extname } from 'path';
 
 const CONFIG_DIR = join(homedir(), '.claude', 'homunculus');
 const OBSERVATIONS_FILE = join(CONFIG_DIR, 'observations.jsonl');
 const MAX_FILE_SIZE_MB = 10;
 
-// Ensure directory exists
 mkdirSync(CONFIG_DIR, { recursive: true });
 
-// Skip if disabled
 if (existsSync(join(CONFIG_DIR, 'disabled'))) process.exit(0);
 
-// Read JSON from stdin
 let inputJson = '';
 try {
 	inputJson = readFileSync(0, 'utf8').trim();
@@ -38,35 +36,114 @@ try {
 
 if (!inputJson) process.exit(0);
 
-let parsed;
+/**
+ * Extract structured metadata from tool input/output.
+ * Returns a compact object with only the fields that matter for pattern detection.
+ */
+function extractMeta(toolName, toolInput, toolOutput, event) {
+	const meta = {};
+	const input = typeof toolInput === 'object' ? toolInput : {};
+	const outputStr = typeof toolOutput === 'string' ? toolOutput : JSON.stringify(toolOutput || '');
+
+	// File path extraction — the most important signal for correlating tool sequences
+	const filePath = input.file_path || input.path || input.file || null;
+	if (filePath) {
+		meta.file = filePath;
+		const ext = extname(filePath);
+		if (ext) meta.ext = ext;
+	}
+
+	// Tool-specific metadata
+	switch (toolName) {
+		case 'Bash': {
+			const cmd = input.command || '';
+			// Extract the base command (first word before pipes/args)
+			const baseCmd = cmd.split(/[\s|;&]/)[0].replace(/^.*\//, '');
+			if (baseCmd) meta.cmd = baseCmd;
+			// Flag git operations
+			if (cmd.startsWith('git ')) meta.git_op = cmd.split(/\s+/)[1]; // push, commit, add, etc.
+			// Flag npm/node operations
+			if (baseCmd === 'npm' || baseCmd === 'npx' || baseCmd === 'node') {
+				meta.node_op = cmd.split(/\s+/).slice(0, 3).join(' ');
+			}
+			break;
+		}
+		case 'Edit': {
+			if (input.old_string && input.new_string) {
+				meta.edit_size = Math.abs(input.new_string.length - input.old_string.length);
+				meta.replace_all = input.replace_all || false;
+			}
+			break;
+		}
+		case 'Grep': {
+			if (input.pattern) meta.search = input.pattern.slice(0, 100);
+			if (input.glob) meta.glob = input.glob;
+			break;
+		}
+		case 'Glob': {
+			if (input.pattern) meta.pattern = input.pattern.slice(0, 100);
+			break;
+		}
+		case 'Task': {
+			if (input.subagent_type) meta.agent = input.subagent_type;
+			if (input.model) meta.model = input.model;
+			if (input.description) meta.desc = input.description.slice(0, 80);
+			break;
+		}
+		case 'Write': {
+			if (input.content) meta.write_size = input.content.length;
+			break;
+		}
+	}
+
+	// Error detection from output (PostToolUse only)
+	if (event === 'tool_complete' && outputStr) {
+		const lower = outputStr.slice(0, 2000).toLowerCase();
+		if (
+			lower.includes('error') ||
+			lower.includes('failed') ||
+			lower.includes('exception') ||
+			lower.includes('enoent') ||
+			lower.includes('permission denied') ||
+			lower.includes('not found')
+		) {
+			meta.has_error = true;
+			// Extract first error-like line for context
+			const errorLine = outputStr
+				.split('\n')
+				.find(
+					(l) =>
+						/error|failed|exception|enoent|permission denied|not found/i.test(l) && l.trim().length > 5,
+				);
+			if (errorLine) meta.error_hint = errorLine.trim().slice(0, 200);
+		}
+	}
+
+	return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
+let observation;
 try {
 	const data = JSON.parse(inputJson);
 
 	const hookType = data.hook_type || 'unknown';
 	const toolName = data.tool_name || data.tool || 'unknown';
-	let toolInput = data.tool_input || data.input || {};
-	let toolOutput = data.tool_output || data.output || '';
+	const toolInput = data.tool_input || data.input || {};
+	const toolOutput = data.tool_output || data.output || '';
 	const sessionId = data.session_id || 'unknown';
-
-	// Truncate large inputs/outputs
-	const inputStr =
-		typeof toolInput === 'object' ? JSON.stringify(toolInput).slice(0, 5000) : String(toolInput).slice(0, 5000);
-	const outputStr =
-		typeof toolOutput === 'object'
-			? JSON.stringify(toolOutput).slice(0, 5000)
-			: String(toolOutput).slice(0, 5000);
-
 	const event = hookType.includes('Pre') ? 'tool_start' : 'tool_complete';
 
-	parsed = {
+	observation = {
+		timestamp: new Date().toISOString(),
 		event,
 		tool: toolName,
-		input: event === 'tool_start' ? inputStr : undefined,
-		output: event === 'tool_complete' ? outputStr : undefined,
 		session: sessionId,
 	};
+
+	// Extract structured metadata instead of dumping raw input/output
+	const meta = extractMeta(toolName, toolInput, toolOutput, event);
+	if (meta) observation.meta = meta;
 } catch (e) {
-	// Log parse error for debugging
 	const timestamp = new Date().toISOString();
 	const errorEntry = JSON.stringify({ timestamp, event: 'parse_error', raw: inputJson.slice(0, 2000) });
 	appendFileSync(OBSERVATIONS_FILE, errorEntry + '\n');
@@ -77,8 +154,7 @@ try {
 if (existsSync(OBSERVATIONS_FILE)) {
 	try {
 		const stats = statSync(OBSERVATIONS_FILE);
-		const sizeMB = stats.size / (1024 * 1024);
-		if (sizeMB >= MAX_FILE_SIZE_MB) {
+		if (stats.size / (1024 * 1024) >= MAX_FILE_SIZE_MB) {
 			const archiveDir = join(CONFIG_DIR, 'observations.archive');
 			mkdirSync(archiveDir, { recursive: true });
 			const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -88,16 +164,5 @@ if (existsSync(OBSERVATIONS_FILE)) {
 		/* ignore stat/rename errors */
 	}
 }
-
-// Build and write observation
-const observation = {
-	timestamp: new Date().toISOString(),
-	event: parsed.event,
-	tool: parsed.tool,
-	session: parsed.session,
-};
-
-if (parsed.input) observation.input = parsed.input;
-if (parsed.output) observation.output = parsed.output;
 
 appendFileSync(OBSERVATIONS_FILE, JSON.stringify(observation) + '\n');
