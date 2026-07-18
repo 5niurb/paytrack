@@ -29,10 +29,13 @@ The items below are older loose ends, not active problems.
 - [ ] **Manual end-to-end test of Phase 2 compliance workflows** — license verification,
       e-signature, nightly compliance scan. Outstanding since the 2026-05-29 session; may
       still be relevant. **Done =** each flow exercised once against real data.
-- [ ] **SESSION_NOTES may be out of sync with CLAUDE.md's changelog** — CLAUDE.md's "Recent
-      Changes" has a 2026-07-15 entry (server.js split, invoice-summary extraction, PIN
-      lockout) with no corresponding SESSION_NOTES entry. Worth reconciling so the history
-      isn't split across two files that disagree.
+- [x] ~~SESSION_NOTES out of sync with CLAUDE.md's changelog~~ — **RESOLVED 2026-07-17.**
+      The premise was stale: the 2026-07-15 Wave 2.B entry already existed (buried at the
+      *bottom* of SESSION_NOTES, line ~1214). Root cause of the confusion: the file is NOT
+      chronologically ordered, so the SessionStart hook reads the top entry (2026-06-11) as
+      "last session" and never surfaces newer work. Two same-day follow-up commits (`a6b2ccf`
+      invoice-presentation extraction → server.js 809→496; `613b064` Wave 3 config dedupe) were
+      genuinely undocumented — now appended. Added a file-order caveat note to SESSION_NOTES.
 
 **Settled — don't re-litigate:**
 - **Admin auth is standardized on the `x-admin-password` header only** — the legacy

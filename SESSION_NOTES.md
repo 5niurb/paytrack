@@ -1228,3 +1228,41 @@ server.js ──┼─ routes/time-entries.js (verify-pin/change-pin ──> lib
 **Current State:** All 11 suites green (~252 assertions). Committed: 68a588a (extraction), 66a2ceb (split), 238c99b (lockout). NOT deployed — orchestrator deploys.
 **Issues:** None known. Lockout degrades gracefully if migration missing (already applied to prod, so moot).
 **Next Steps:** Orchestrator deploy (`fly deploy -a lm-paytrack`). Post-deploy, verify /api/health and a PIN login.
+
+---
+
+## Session — 2026-07-15 (Wave 2.B/3 follow-ups: presentation extraction + config dedupe)
+**Focus:** Two follow-up commits made the same day as Wave 2.B but not captured in the entry above.
+**Accomplished:**
+- **lib/invoice-presentation.js (`a6b2ccf`)** — moved `buildInvoiceImageSvg`, `sendInvoiceEmail`, `sendInvoiceSms`, `formatHours`, `escapeXml`, and `LEA_PHONE` out of server.js into a dedicated module (verbatim movement; server.js imports them + passes through `routeDeps` unchanged). **server.js 809 → 496 lines** — now purely middleware, startup guards, health, Supabase clients, and route mounting. All 11 suites green; boot smoke verified (health 200, /admin serves HTML, verify-pin rejects, invoice-media 401).
+- **Wave 3 config dedupe (`613b064`)** — deleted `.claude/rules/common/*` (duplicate of the canonical lmdev copy) and 8 duplicated skills (api-design, capture-specs, checkpoint, commit, database-migrations, deploy, postgres-patterns, security-review); retired `/orchestrate`. Kept `continuous-learning-v2` + `strategic-compact` locally (settings.json hooks reference their scripts) synced to workspace-canonical versions. CLAUDE.md skills list updated.
+**Current State:** server.js down to 496 lines across the two-commit arc (2,696 → 809 → 496). Project config now inherits from workspace/global instead of carrying stale local copies.
+**Issues:** None. **Next Steps:** None.
+
+> **Note on file order:** entries in this file are NOT strictly chronological — the 2026-07-15 entries sit at the bottom while 2026-06-11 is at the top. The SessionStart hook reads the file's *first* entry as "last session," so it under-reports recent work. When adding entries, appending at the end is correct per the append-only rule; just don't trust top-of-file as "most recent."
+
+---
+
+## Session — 2026-07-18 (Time-entry worksheet: Self Treat / non-billable time)
+**Focus:** Staff were forgetting to "clock out" for free/discounted treatments they receive onsite (non-billable). Redesigned the daily time-entry section so billable time is explicit as a subtraction.
+**Accomplished:**
+- **New field `staff_treatment_minutes`** on `time_entries` (migration `012`, APPLIED to prod Supabase via Management API — verified column exists, `INTEGER DEFAULT 0`, mirrors `break_minutes`). Also added to `supabase-schema.sql` base.
+- **Time section restructured into a 3-row math worksheet** (`public/index.html` + `css/index.css`):
+  - Row 1 **Onsite Time** — In / Out + read-only **Total Onsite** (gross In→Out)
+  - Row 2 **Non-Billable Time (mins)** — Breaks/Personal (`break_minutes`, relabeled) + **Self Treat** (new) + read-only **Total Non-Billable** (`−N min`, red, always shown)
+  - Subtraction rule → Row 3 **Billable Time** (`H:MM`) + **Billable Hours** (decimal)
+- **`calculateHours()` rewritten** (`public/js/index.js`) to compute all three tiers; extracted `fmtHM()` helper. Self Treat added to save payload + `clearForm()` reset.
+- **Server** (`routes/time-entries.js`): accept `staffTreatmentMinutes` on insert, added to both SELECT lists + the admin response mapper. **`hours` still stored net client-side** — NO invoice/pay-period math changed (billable hours flow through unchanged).
+- **Admin entry breakdown** (`public/js/admin.js`): added `SELF TREAT:` line; relabeled `HOURS` → `BILLABLE HOURS`.
+- Same UI/behavior desktop + mobile (single responsive codebase — no separate mobile build).
+**Verification:** All 11 test suites green; `node -c` clean. Drove the real client `calculateHours()` in a browser (served `public/` over local HTTP — `file://` is blocked) across 4 cases: 8h−30−15 → 7:15/7.25 ✓; zero deductions → 8:00/8.00 ✓; self-treat-only 60 → 7:00/7.00 ✓; overnight 22:00→06:00−20 → 7:40/7.67 ✓. Screenshot confirmed the worksheet renders as designed (subtraction rule, red non-billable, green billable box).
+**Diagram:**
+```
+ONSITE TIME          In [09:00]  Out [17:00]   Total Onsite: 8:00
+NON-BILLABLE (mins)  Breaks [30] SelfTreat [15] Total Non-Billable: −45 min
+────────────────────────────────────────────────  (subtraction rule)
+BILLABLE             Billable Time 7:15   Billable Hours 7.25
+                     (stored as time_entries.hours = 7.25, net)
+```
+**Current State:** Feature complete + verified locally. Migration live in prod. NOT deployed to Fly yet (code push pending).
+**Issues:** None. **Next Steps:** `fly deploy -a lm-paytrack`, then confirm on prod that a saved entry round-trips `staff_treatment_minutes` and the admin breakdown shows Self Treat.

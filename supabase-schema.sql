@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
   start_time TEXT,
   end_time TEXT,
   break_minutes INTEGER DEFAULT 0,
+  staff_treatment_minutes INTEGER DEFAULT 0,
   hours DECIMAL(10,2) NOT NULL,
   description TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

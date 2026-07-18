@@ -50,6 +50,9 @@
       startTime: document.getElementById('start-time'),
       endTime: document.getElementById('end-time'),
       breakMinutes: document.getElementById('break-minutes'),
+      staffTreatmentMinutes: document.getElementById('staff-treatment-minutes'),
+      totalOnsite: document.getElementById('total-onsite'),
+      totalNonbillable: document.getElementById('total-nonbillable'),
       entryNotes: document.getElementById('entry-notes'),
       serviceEntriesContainer: document.getElementById('service-entries-container'),
       salesEntriesContainer: document.getElementById('sales-entries-container'),
@@ -486,6 +489,11 @@
       const startTime = $.startTime.value;
       const endTime = $.endTime.value;
       const breakMinutes = parseInt($.breakMinutes.value) || 0;
+      const staffTreatmentMinutes = parseInt($.staffTreatmentMinutes.value) || 0;
+
+      // Non-billable = breaks/personal + self-treatment (always shown, even at 0)
+      const nonBillableMinutes = breakMinutes + staffTreatmentMinutes;
+      if ($.totalNonbillable) $.totalNonbillable.textContent = `−${nonBillableMinutes} min`;
 
       if (startTime && endTime) {
         const start = new Date(`2000-01-01T${startTime}`);
@@ -495,21 +503,29 @@
           end.setDate(end.getDate() + 1);
         }
 
-        const diffMs = end - start;
-        const diffHours = (diffMs / (1000 * 60 * 60)) - (breakMinutes / 60);
-        const hours = Math.max(0, diffHours);
+        // Row 1: gross onsite duration (before any deduction)
+        const onsiteHours = (end - start) / (1000 * 60 * 60);
+        if ($.totalOnsite) $.totalOnsite.textContent = fmtHM(onsiteHours);
 
-        const totalMinutes = Math.round(hours * 60);
-        const hh = Math.floor(totalMinutes / 60);
-        const mm = String(totalMinutes % 60).padStart(2, '0');
-        $.calculatedTime.textContent = `${hh}:${mm}`;
+        // Row 3: billable = onsite − non-billable
+        const hours = Math.max(0, onsiteHours - (nonBillableMinutes / 60));
+        $.calculatedTime.textContent = fmtHM(hours);
         $.calculatedHours.textContent = hours.toFixed(2);
         return hours;
       }
 
+      if ($.totalOnsite) $.totalOnsite.textContent = '0:00';
       $.calculatedTime.textContent = '0:00';
       $.calculatedHours.textContent = '0.00';
       return 0;
+    }
+
+    // Format a decimal-hours value as H:MM (e.g. 7.25 -> "7:15")
+    function fmtHM(decimalHours) {
+      const totalMinutes = Math.round(Math.max(0, decimalHours) * 60);
+      const hh = Math.floor(totalMinutes / 60);
+      const mm = String(totalMinutes % 60).padStart(2, '0');
+      return `${hh}:${mm}`;
     }
 
     // Service Entries (renamed from Patient)
@@ -792,6 +808,7 @@
         startTime: $.startTime.value,
         endTime: $.endTime.value,
         breakMinutes: parseInt($.breakMinutes.value) || 0,
+        staffTreatmentMinutes: parseInt($.staffTreatmentMinutes.value) || 0,
         hours,
         description: $.entryNotes.value.trim(),
         clients,
@@ -854,7 +871,10 @@
       $.startTime.value = '';
       $.endTime.value = '';
       $.breakMinutes.value = '0';
+      $.staffTreatmentMinutes.value = '0';
       $.entryNotes.value = '';
+      if ($.totalOnsite) $.totalOnsite.textContent = '0:00';
+      if ($.totalNonbillable) $.totalNonbillable.textContent = '−0 min';
       $.calculatedTime.textContent = '0:00';
       $.calculatedHours.textContent = '0.00';
       $.serviceEntriesContainer.innerHTML = '';

@@ -387,7 +387,8 @@
           <strong style="color: #999; font-size: 11px; letter-spacing: 0.05em;">DATE:</strong> ${formatDate(entry.date)}<br>
           <strong style="color: #999; font-size: 11px; letter-spacing: 0.05em;">TIME:</strong> ${entry.start_time ? formatTime(entry.start_time) : '-'} - ${entry.end_time ? formatTime(entry.end_time) : '-'}<br>
           <strong style="color: #999; font-size: 11px; letter-spacing: 0.05em;">BREAK:</strong> ${entry.break_minutes || 0} minutes<br>
-          <strong style="color: #999; font-size: 11px; letter-spacing: 0.05em;">HOURS:</strong> ${entry.hours.toFixed(2)}
+          <strong style="color: #999; font-size: 11px; letter-spacing: 0.05em;">SELF TREAT:</strong> ${entry.staff_treatment_minutes || 0} minutes<br>
+          <strong style="color: #999; font-size: 11px; letter-spacing: 0.05em;">BILLABLE HOURS:</strong> ${entry.hours.toFixed(2)}
         </div>
         ${servicesHtml}
         ${salesHtml}

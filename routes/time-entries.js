@@ -181,7 +181,7 @@ router.delete('/api/time-entry/:id', async (req, res) => {
 });
 
 router.post('/api/time-entry', async (req, res) => {
-  const { employeeId, date, startTime, endTime, breakMinutes, hours, description, clients, productSales } = req.body;
+  const { employeeId, date, startTime, endTime, breakMinutes, staffTreatmentMinutes, hours, description, clients, productSales } = req.body;
   const pin = req.headers['x-employee-pin'];
 
   if (!(await verifyEmployeePin(employeeId, pin))) {
@@ -196,6 +196,7 @@ router.post('/api/time-entry', async (req, res) => {
       start_time: startTime || null,
       end_time: endTime || null,
       break_minutes: breakMinutes || 0,
+      staff_treatment_minutes: staffTreatmentMinutes || 0,
       hours: hours,
       description: description || ''
     })
@@ -252,7 +253,7 @@ router.get('/api/time-entries/:employeeId', async (req, res) => {
 
   const { data: entries, error } = await supabaseAdmin
     .from('time_entries')
-    .select('id, date, start_time, end_time, break_minutes, hours, description, created_at')
+    .select('id, date, start_time, end_time, break_minutes, staff_treatment_minutes, hours, description, created_at')
     .eq('employee_id', parseInt(employeeId))
     .order('date', { ascending: false })
     .order('created_at', { ascending: false });
@@ -296,6 +297,7 @@ router.get('/api/admin/time-entries', async (req, res) => {
       start_time,
       end_time,
       break_minutes,
+      staff_treatment_minutes,
       hours,
       description,
       created_at,
@@ -365,6 +367,7 @@ router.get('/api/admin/time-entries', async (req, res) => {
       start_time: entry.start_time,
       end_time: entry.end_time,
       break_minutes: entry.break_minutes,
+      staff_treatment_minutes: entry.staff_treatment_minutes,
       hours: entry.hours,
       description: entry.description,
       created_at: entry.created_at,

@@ -43,19 +43,26 @@
 
 **Components:**
 - Date picker (scrollable wheel, limited to past dates only)
-- Start/end time inputs with automatic hour calculation
-- Break time input (minutes, deducted from total)
+- **Time worksheet** — a three-row "math" layout making billable time explicit:
+  - **Onsite Time:** In / Out (5-min `type="time"`) + read-only **Total Onsite** (gross In→Out duration)
+  - **Non-Billable Time (mins):** Breaks/Personal (`break_minutes`) + Self Treat (`staff_treatment_minutes`, non-billable staff treatment received onsite) + read-only **Total Non-Billable** (`−N min`, always shown, red)
+  - Subtraction rule (horizontal line) → **Billable Time** (`H:MM`) + **Billable Hours** (decimal), = Onsite − Non-Billable
+  - Both minute fields are identical 0/5/…/120 dropdowns
 - Service entries: patient name, procedure, amount earned, tip amount
 - Sales entries: product name, sale amount, commission (percentage or flat toggle)
 - Duplicate date detection with override modal
 
 **Acceptance Criteria:**
 - [ ] Date wheel only allows past dates
-- [ ] Hours auto-calculate from start/end times minus breaks
+- [ ] Billable = Onsite − (Breaks/Personal + Self Treat); recomputes on any field change
+- [ ] Total Onsite and Total Non-Billable always display (0:00 / −0 min when empty)
+- [ ] Overnight shifts (Out < In) compute correctly (+24h)
+- [ ] Stored `time_entries.hours` is the net billable value (no server-side re-derivation)
+- [ ] Identical UI/behavior on desktop and mobile (single responsive codebase)
 - [ ] Service entries capture patient, procedure, earnings, tips
 - [ ] Sales entries toggle between percentage and flat commission
 - [ ] Duplicate date detected → override confirmation modal
-- [ ] Save persists all data to Supabase
+- [ ] Save persists all data to Supabase (incl. `staff_treatment_minutes`)
 
 ---
 
@@ -328,7 +335,7 @@ Shared module used by both server.js and tests. Exports: `validateSSN`, `validat
 |-------|---------|-----------|
 | `employees` | Staff profiles | name, pin, email, hourly_wage, commission_rate, pay_type, review_token, review_completed_at |
 | `employee_onboarding` | Worker onboarding submissions | employee_id, personal info, address, tax (W-9), license, banking, attestation |
-| `time_entries` | Daily hours | employee_id, date, start_time, end_time, break_minutes, hours |
+| `time_entries` | Daily hours | employee_id, date, start_time, end_time, break_minutes, staff_treatment_minutes, hours |
 | `client_entries` | Service work | time_entry_id, client_name, procedure_name, amount_earned, tip_amount, tip_received_cash |
 | `product_sales` | Sales commissions | time_entry_id, product_name, sale_amount, commission_amount |
 | `invoices` | Submitted summaries | employee_id, pay_period_start/end, totals, submitted_at, email_sent |
@@ -339,7 +346,9 @@ Shared module used by both server.js and tests. Exports: `validateSSN`, `validat
 ## Earning Calculation Logic
 
 ```
-Total Hours    = sum(time_entries.hours) for period
+Billable Hours = onsite (out − in) − (break_minutes + staff_treatment_minutes)
+                 computed client-side in calculateHours(); stored net as time_entries.hours
+Total Hours    = sum(time_entries.hours) for period   (already net of non-billable time)
 Total Wages    = Total Hours × employee.hourly_wage
 Total Comms    = sum(client_entries.amount_earned) for period
 Total Tips     = sum(client_entries.tip_amount) for period

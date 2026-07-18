@@ -533,6 +533,54 @@
       color: #fff;
     }
 
+    /* Time worksheet: Onsite − Non-Billable = Billable */
+    .time-worksheet {
+      margin-bottom: 16px;
+    }
+
+    .ws-row {
+      margin-bottom: 8px;
+    }
+
+    .ws-row .time-row {
+      margin-bottom: 0;
+    }
+
+    .ws-row-title {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #8a8a8a;
+      margin-bottom: 6px;
+    }
+
+    .ws-row-deduct .ws-row-title {
+      color: #d99;
+    }
+
+    /* Read-only computed totals — deliberately NOT styled as inputs */
+    .ws-total {
+      display: flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 12px;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      color: #fff;
+      background: transparent;
+      border-bottom: 1px dashed #444;
+    }
+
+    .ws-total-deduct {
+      color: #ff9b9b;
+    }
+
+    /* Subtraction rule between Non-Billable and Billable */
+    .ws-rule {
+      border-top: 2px solid #555;
+      margin: 4px 0 12px;
+    }
+
     /* Service entries */
     .service-entries {
       margin-top: 24px;
