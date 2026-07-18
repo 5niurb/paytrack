@@ -8,3 +8,8 @@ paytrack.db
 dist/
 build/
 .npm/
+
+# Local tooling scratch (Claude Code / Superpowers / planning) — not part of the app
+.playwright-cli/
+.superpowers/
+docs/plans/
