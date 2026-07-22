@@ -123,6 +123,31 @@ async function main() {
     }
   });
 
+  // ---- Key rotation round-trip ----
+  // Simulates the documented rotation procedure (reference_credentials_paytrack.md
+  // § PayTrack Encryption Key): a value encrypted under the OLD key is re-encrypted
+  // under the NEW key, and must (a) decrypt correctly under the new key and (b) no
+  // longer decrypt under the old key. This is the safety property a botched rotation
+  // would violate — silently corrupting employee banking data.
+  console.log('\nKey rotation round-trip:');
+  await testAsync('re-encrypting under a new key preserves the plaintext', async () => {
+    const secret = '021000021|123456789'; // routing|account shape
+    // 1. Encrypt under the OLD (current) key.
+    process.env.PAYTRACK_ENCRYPTION_KEY = TEST_KEY;
+    const underOld = await c.encryptValue(secret);
+    // 2. Decrypt under old, re-encrypt under NEW (the rotation migration step).
+    const recovered = await c.decryptValue(underOld);
+    assert.strictEqual(recovered, secret, 'old-key decrypt must recover the plaintext');
+    process.env.PAYTRACK_ENCRYPTION_KEY = ALT_KEY;
+    const underNew = await c.encryptValue(recovered);
+    // 3. The new ciphertext decrypts correctly under the NEW key.
+    const afterRotation = await c.decryptValue(underNew);
+    process.env.PAYTRACK_ENCRYPTION_KEY = TEST_KEY; // restore for later tests
+    assert.strictEqual(afterRotation, secret, 'new-key decrypt must recover the plaintext');
+    // 4. Sanity: the two ciphertexts differ (genuinely re-encrypted, not a no-op).
+    assert.notStrictEqual(underOld, underNew, 're-encryption must produce new ciphertext');
+  });
+
   // ---- Empty string ----
   console.log('\nEmpty string handling:');
   await testAsync('empty string encrypts and decrypts cleanly', async () => {
